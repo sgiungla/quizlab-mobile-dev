@@ -23,8 +23,19 @@ const gradeFromRatio=(correct,total)=>total?Math.round((correct/total)*300)/10:0
 const fmtGrade=v=>Number.isFinite(Number(v))?(Number.isInteger(clamp(v,0,30))?clamp(v,0,30)+'/30':clamp(v,0,30).toFixed(1).replace('.',',')+'/30'):'—';
 const fmtDuration=ms=>{const t=Math.max(0,Math.floor((Number(ms)||0)/1000)),m=Math.floor(t/60),sec=t%60;return String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');};
 
-function emptyCourse(subject=''){return {subject:norm(subject),officialBank:[],aiBank:[],topicMap:null,aiWorkflow:{},attempts:[],exams:[],marked:[],pendingReview:[],historicalWrong:[],fullCampaign:{signature:'',seenIds:[]},createdAt:now(),updatedAt:now()};}
-function shape(c){const x={...emptyCourse(c?.subject||''),...(c||{})};for(const k of ['officialBank','aiBank','attempts','exams','marked','pendingReview','historicalWrong'])if(!Array.isArray(x[k]))x[k]=[];if(!x.fullCampaign||typeof x.fullCampaign!=='object')x.fullCampaign={signature:'',seenIds:[]};x.marked=uniq(x.marked);x.pendingReview=uniq(x.pendingReview);x.historicalWrong=uniq(x.historicalWrong);return x;}
+function emptyCourse(subject=''){return {subject:norm(subject),officialBank:[],aiBank:[],topicMap:null,aiWorkflow:{},attempts:[],exams:[],marked:[],pendingReview:[],historicalWrong:[],fullCampaign:{signature:'all',seenIds:[],resetAt:null},createdAt:now(),updatedAt:now()};}
+function shape(c){
+ const x={...emptyCourse(c?.subject||''),...(c||{})};
+ for(const k of ['officialBank','aiBank','attempts','exams','marked','pendingReview','historicalWrong'])if(!Array.isArray(x[k]))x[k]=[];
+ if(!x.fullCampaign||typeof x.fullCampaign!=='object')x.fullCampaign={signature:'all',seenIds:[],resetAt:null};
+ if(!Array.isArray(x.fullCampaign.seenIds))x.fullCampaign.seenIds=[];
+ if(!('resetAt' in x.fullCampaign))x.fullCampaign.resetAt=null;
+ const resetAt=x.fullCampaign.resetAt;
+ const legacyFull=x.attempts.filter(a=>a?.mode==='full'&&(!resetAt||String(a.at)>=String(resetAt))).map(a=>a.questionId);
+ x.fullCampaign.seenIds=uniq([...x.fullCampaign.seenIds,...legacyFull]);
+ x.marked=uniq(x.marked);x.pendingReview=uniq(x.pendingReview);x.historicalWrong=uniq(x.historicalWrong);
+ return x;
+}
 function course(id=route.courseId){return id&&store.courses[id]?shape(store.courses[id]):null;}
 function saveCourse(id,c){
  c.updatedAt=now();store.courses[id]=c;
@@ -120,7 +131,7 @@ function selectBalanced(pool,count){const out=[],used=new Set(),order=['easy','m
 function selectTraining(pool,count,source='mixed'){const p=filterSource(pool,source),n=Math.min(count,p.length);if(source!=='mixed')return selectBalanced(p,n);const off=p.filter(q=>q.source==='official'),ai=p.filter(q=>q.source==='ai');if(!off.length||!ai.length)return selectBalanced(p,n);let out=[...selectBalanced(off,Math.min(off.length,Math.ceil(n/2))),...selectBalanced(ai,Math.min(ai.length,Math.floor(n/2)))],ids=new Set(out.map(q=>q.id));if(out.length<n)out=[...out,...selectBalanced(p.filter(q=>!ids.has(q.id)),n-out.length)];return shuffle(out.slice(0,n));}
 function amountValue(id,available){const raw=document.getElementById(id)?.value;return raw==='all'?available:Math.min(Number(raw)||0,available);}
 async function fullCampaignPool(c,count,source){const all=filterSource(qbank(c),source),seen=new Set(c.fullCampaign?.seenIds||[]),remaining=all.filter(q=>!seen.has(q.id)),latest=new Set(latestMap(c).keys()),never=remaining.filter(q=>!latest.has(q.id)),old=remaining.filter(q=>latest.has(q.id));let out=selectTraining(never,Math.min(count,never.length),source);if(out.length<count){const ids=new Set(out.map(q=>q.id));out=[...out,...selectTraining(old.filter(q=>!ids.has(q.id)),count-out.length,source)];}return out;}
-async function resetCycle(){const c=course();c.fullCampaign={signature:'',seenIds:[]};await saveCourse(route.courseId,c);toast('Ciclo materia ricominciato');training();}
+async function resetCycle(){const c=course();c.fullCampaign={signature:'all',seenIds:[],resetAt:now()};await saveCourse(route.courseId,c);toast('Ciclo materia ricominciato 🌱');training();}
 function startSession(questions,title,mode='training'){
  if(!questions.length){toast('Nessuna domanda disponibile');return;}
  session={questions:[...questions],index:0,answers:{},title,mode,startedAt:Date.now(),questionShownAt:Date.now(),feedback:null,durationMs:mode==='exam'?30*60*1000:0,finished:false};
@@ -133,21 +144,47 @@ function sessionView(){
  const c=course(),q=current();if(!q)return setRoute('dashboard');
  const a=session.answers[q.id]||{},feedback=!!a.confirmed,mark=(c.marked||[]).includes(q.id),isExam=session.mode==='exam',isStudy=session.mode==='study';
  let html='<div class="stack"><section class="card"><div class="toolbar"><span class="pill">'+(session.index+1)+' / '+session.questions.length+'</span><span class="pill '+(q.source==='official'?'off':'ai')+'">'+(q.source==='official'?'Ufficiale':'AI')+'</span><span class="pill">Cap. '+q.chapter+'</span><span class="pill">'+esc(q.difficulty||'medium')+'</span>'+(q.topic?'<span class="pill">'+esc(q.topic)+'</span>':'')+(isExam?'<span class="pill" id="examTimer">'+fmtDuration(session.durationMs-(Date.now()-session.startedAt))+'</span>':'')+'<button class="btn ghost" data-action="mark">'+(mark?'★ Segnata':'☆ Segna')+'</button></div><div class="progress"><span style="width:'+(((session.index+1)/session.questions.length)*100)+'%"></span></div><div class="question">'+esc(q.text)+'</div>';
- for(const o of q.options||[]){let cl='option';if(a.selected===o.letter)cl+=' selected';if(isStudy&&o.letter===q.correct)cl+=' correct';if(!isExam&&!isStudy&&feedback&&o.letter===q.correct)cl+=' correct';if(!isExam&&!isStudy&&feedback&&a.selected===o.letter&&a.selected!==q.correct)cl+=' wrong';html+='<button class="'+cl+'" data-action="answer" data-letter="'+esc(o.letter)+'" '+((feedback&&!isExam)||isStudy?'disabled':'')+'><span class="letter">'+esc(o.letter)+'</span><span>'+esc(o.text)+'</span></button>';}
+ for(const o of q.options||[]){let cl='option';if(a.selected===o.letter)cl+=' selected';if(isStudy&&o.letter===q.correct)cl+=' correct';if(!isExam&&!isStudy&&feedback&&o.letter===q.correct)cl+=' correct';if(!isExam&&!isStudy&&feedback&&a.selected===o.letter&&a.selected!==q.correct)cl+=' wrong';html+='<button class="'+cl+'" data-action="answer" data-letter="'+esc(o.letter)+'" '+(((feedback&&!isExam)||(isExam&&a.confirmed)||isStudy)?'disabled':'')+'><span class="letter">'+esc(o.letter)+'</span><span>'+esc(o.text)+'</span></button>';}
  if(isStudy){html+='<div class="feedback ok"><strong>✅ Risposta corretta evidenziata</strong>'+(q.explanation?'<p>'+esc(q.explanation)+'</p>':'')+(q.reference?'<p class="muted"><strong>Fonte:</strong> '+esc(q.reference)+'</p>':'')+'</div>';}
  else if(!isExam&&feedback){html+='<div class="feedback '+(a.correct?'ok':'bad')+'"><strong>'+(a.correct?'✓ Corretta':'✕ Errata · corretta '+esc(q.correct))+'</strong>'+(q.explanation?'<p>'+esc(q.explanation)+'</p>':'')+(q.reference?'<p class="muted"><strong>Fonte:</strong> '+esc(q.reference)+'</p>':'')+'</div>';}
- if(isExam){html+='<div class="actions"><button class="btn ghost" data-action="exam-prev" '+(session.index===0?'disabled':'')+'>← Indietro</button><button class="btn" data-action="exam-next">'+(session.index===session.questions.length-1?'Consegna':'Avanti →')+'</button></div><p class="subtle">Nessuna correzione durante la prova. Le prime 30 domande determinano il voto; la 31ª vale solo per la lode.</p>';}
+ if(isExam){const examNextLabel=session.index===session.questions.length-1?(a.selected&&!a.confirmed?'Conferma e consegna':'Consegna'):(a.selected&&!a.confirmed?'Conferma e avanti →':'Avanti →');html+='<div class="actions"><button class="btn ghost" data-action="exam-prev" '+(session.index===0?'disabled':'')+'>← Indietro</button><button class="btn" data-action="exam-next">'+examNextLabel+'</button></div><p class="subtle">'+(a.confirmed?'Risposta registrata · nessuna correzione mostrata.':'Nessuna correzione durante la prova.')+' Le prime 30 determinano il voto; la 31ª vale solo per la lode.</p>';}
  else if(isStudy){html+='<div class="actions"><button class="btn ghost" data-action="study-prev" '+(session.index===0?'disabled':'')+'>← Indietro</button><button class="btn" data-action="study-next">'+(session.index===session.questions.length-1?'Fine':'Prossima →')+'</button></div>';}
  else {html+='<div class="actions">'+(!feedback?'<button class="btn" data-action="confirm" '+(a.selected?'':'disabled')+'>Conferma</button>':'<button class="btn" data-action="next">'+(session.index===session.questions.length-1?'Risultati':'Avanti →')+'</button>')+'</div>';}
  html+='</section></div>';page(html,c.subject,session.title,true);
 }
 
-async function confirmAnswer(){if(session.mode==='exam'||session.mode==='study')return;const c=course(),q=current(),a=session.answers[q.id];if(!a?.selected)return;const correct=a.selected===q.correct;a.confirmed=true;a.correct=correct;a.at=now();const elapsedMs=Date.now()-session.questionShownAt;c.attempts.push({questionId:q.id,chapter:q.chapter,source:q.source,difficulty:q.difficulty,correct,answer:a.selected,at:a.at,elapsedMs,mode:session.mode});if(!correct){c.pendingReview=uniq([...c.pendingReview,q.id]);c.historicalWrong=uniq([...c.historicalWrong,q.id]);}else if(session.mode==='review'){c.pendingReview=c.pendingReview.filter(id=>id!==q.id);}await saveCourse(route.courseId,c);render();}
+async function confirmAnswer(){
+ if(session.mode==='exam'||session.mode==='study')return;
+ const c=course(),q=current(),a=session.answers[q.id];if(!a?.selected)return;
+ const correct=a.selected===q.correct;a.confirmed=true;a.correct=correct;a.at=now();
+ const elapsedMs=Date.now()-session.questionShownAt;
+ c.attempts.push({questionId:q.id,chapter:q.chapter,source:q.source,difficulty:q.difficulty,correct,answer:a.selected,at:a.at,elapsedMs,mode:session.mode});
+ if(session.mode==='full'){
+   c.fullCampaign=c.fullCampaign||{signature:'all',seenIds:[],resetAt:null};
+   c.fullCampaign.seenIds=uniq([...(c.fullCampaign.seenIds||[]),q.id]);
+ }
+ if(!correct){c.pendingReview=uniq([...c.pendingReview,q.id]);c.historicalWrong=uniq([...c.historicalWrong,q.id]);}
+ else if(session.mode==='review'){c.pendingReview=c.pendingReview.filter(id=>id!==q.id);}
+ await saveCourse(route.courseId,c);render();
+}
 function nextQuestion(){if(session.index<session.questions.length-1){session.index++;session.questionShownAt=Date.now();render();}else{route.name='results';render();}}
+async function confirmExamAnswer(){
+ if(!session||session.mode!=='exam')return;
+ const c=course(),q=current(),a=session.answers[q.id];if(!a?.selected||a.confirmed)return;
+ const correct=a.selected===q.correct;a.confirmed=true;a.correct=correct;a.at=now();
+ const elapsedMs=Date.now()-session.questionShownAt;
+ c.attempts.push({questionId:q.id,chapter:q.chapter,source:q.source,difficulty:q.difficulty,correct,answer:a.selected,at:a.at,elapsedMs,mode:'exam',isLode:session.index===30});
+ if(!correct){c.pendingReview=uniq([...c.pendingReview,q.id]);c.historicalWrong=uniq([...c.historicalWrong,q.id]);}
+ await saveCourse(route.courseId,c);
+}
 async function finishExam(timeout=false){
- if(!session||session.mode!=='exam'||session.finished)return;session.finished=true;if(examTimer){clearInterval(examTimer);examTimer=null;}
- const c=course();let correct=0,lodeCorrect=false;const wrong=[];session.questions.forEach((q,i)=>{const a=session.answers[q.id],ok=!!a?.selected&&a.selected===q.correct,isLode=i===30;if(!isLode&&ok)correct++;if(isLode)lodeCorrect=ok;if(!ok)wrong.push(q.id);c.attempts.push({questionId:q.id,chapter:q.chapter,source:q.source,difficulty:q.difficulty,correct:ok,answer:a?.selected||'',answered:!!a?.selected,at:now(),elapsedMs:0,mode:'exam',isLode});if(!ok){c.pendingReview=uniq([...c.pendingReview,q.id]);c.historicalWrong=uniq([...c.historicalWrong,q.id]);}});
- const grade=correct,lode=correct===30&&lodeCorrect,elapsedMs=Date.now()-session.startedAt;c.exams.push({at:now(),grade,lode,correct30:correct,lodeCorrect,elapsedMs,timeout,wrongIds:wrong,questionIds:session.questions.map(q=>q.id)});await saveCourse(route.courseId,c);session.examResult={grade,lode,correct,elapsedMs,wrong};route.name='results';render();
+ if(!session||session.mode!=='exam'||session.finished)return;
+ session.finished=true;if(examTimer){clearInterval(examTimer);examTimer=null;}
+ const c=course();let correct=0,lodeCorrect=false;const wrong=[];
+ session.questions.forEach((q,i)=>{const a=session.answers[q.id],ok=!!a?.selected&&a.selected===q.correct,isLode=i===30;if(!isLode&&ok)correct++;if(isLode)lodeCorrect=ok;if(!ok)wrong.push(q.id);});
+ const grade=correct,lode=correct===30&&lodeCorrect,elapsedMs=Date.now()-session.startedAt;
+ c.exams.push({at:now(),grade,lode,correct30:correct,lodeCorrect,elapsedMs,timeout,wrongIds:wrong,questionIds:session.questions.map(q=>q.id),answeredCount:Object.values(session.answers).filter(a=>a?.selected).length});
+ await saveCourse(route.courseId,c);session.examResult={grade,lode,correct,elapsedMs,wrong};route.name='results';render();
 }
 function results(){if(session?.mode==='exam'){const r=session.examResult;if(!r)return;page('<section class="card hero"><div class="eyebrow">🎓 Esito simulazione</div><h1>'+(r.lode?'30 e lode':r.grade+'/30')+'</h1><p>'+r.correct+'/30 corrette · '+fmtDuration(r.elapsedMs)+'</p><div class="actions"><button class="btn" data-action="dashboard">Dashboard</button><button class="btn secondary" data-action="retry-wrong">Ripassa gli errori</button></div></section>',course().subject,'Risultati',true);return;}const done=Object.entries(session.answers).filter(([,a])=>a.confirmed),ok=done.filter(([,a])=>a.correct).length,total=done.length;page('<section class="card hero"><div class="eyebrow">Sessione completata</div><h1>'+fmtGrade(gradeFromRatio(ok,total))+'</h1><p>'+ok+' / '+total+' · '+pct(total?ok/total:0)+' corrette</p><div class="actions"><button class="btn" data-action="dashboard">Torna alla materia</button><button class="btn secondary" data-action="retry-wrong">Ripassa gli errori</button></div></section>',course().subject,'Risultati',true);}
 
@@ -191,7 +228,13 @@ if(a==='reset-cycle'){resetCycle();return;}
 if(a==='exam'||a==='start-exam'){const c=course(),qs=selectTraining(qbank(c),31,'mixed');startSession(qs,'Simulazione esame','exam');return;}
 if(a==='answer'){const q=current();if(!q)return;session.answers[q.id]={...(session.answers[q.id]||{}),selected:b.dataset.letter};render();return;}
 if(a==='confirm'){await confirmAnswer();return;}if(a==='next'){nextQuestion();return;}
-if(a==='exam-prev'){if(session.index>0){session.index--;session.questionShownAt=Date.now();render();}return;}if(a==='exam-next'){if(session.index>=session.questions.length-1){await finishExam(false);}else{session.index++;session.questionShownAt=Date.now();render();}return;}
+if(a==='exam-prev'){if(session.index>0){session.index--;session.questionShownAt=Date.now();render();}return;}
+if(a==='exam-next'){
+ await confirmExamAnswer();
+ if(session.index>=session.questions.length-1){await finishExam(false);}
+ else{session.index++;session.questionShownAt=Date.now();render();}
+ return;
+}
 if(a==='study-prev'){if(session.index>0){session.index--;render();}return;}if(a==='study-next'){if(session.index>=session.questions.length-1){setRoute('dashboard');}else{session.index++;render();}return;}
 if(a==='mark'){const c=course(),q=current(),set=new Set(c.marked);set.has(q.id)?set.delete(q.id):set.add(q.id);c.marked=[...set];await saveCourse(route.courseId,c);render();return;}
 if(a==='dashboard'){setRoute('dashboard');return;}
