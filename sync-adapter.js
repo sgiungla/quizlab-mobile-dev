@@ -240,6 +240,18 @@ export class QuizLabSyncAdapter {
     return {courseId,bankId:bank.id,revision};
   }
 
+  async deleteCloudCourse(courseId){
+    const user=this.requireUser();
+    const {data,error}=await this.client
+      .from('quizlab_banks')
+      .delete()
+      .eq('owner_id',user.id)
+      .eq('course_id',courseId)
+      .select('id');
+    if(error) throw error;
+    return {courseId,deleted:(data||[]).length};
+  }
+
   async touchDevice(clientId,{push=false,pull=false}={}){
     const user=this.requireUser();
     if(!clientId) return;
