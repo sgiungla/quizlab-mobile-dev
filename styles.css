@@ -128,3 +128,8 @@
 .danger-zone{border-color:#7f1d1d;background:linear-gradient(180deg,rgba(69,10,10,.28),rgba(15,23,42,.98))}
 .danger-btn{background:#7f1d1d;color:#fee2e2;border:1px solid #991b1b}
 .danger-btn:hover{background:#991b1b}
+
+.admin-list{display:grid;gap:10px}
+.admin-user{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px;border:1px solid #263244;border-radius:14px;background:#0b1220}
+.admin-user .actions{margin-top:0;justify-content:flex-end}
+@media(max-width:620px){.admin-user{grid-template-columns:1fr}.admin-user .actions{justify-content:flex-start}}
