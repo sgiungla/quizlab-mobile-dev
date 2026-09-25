@@ -106,7 +106,7 @@ function home(){
  let html='<div class="stack"><section class="card hero jungle-hero"><div class="profile-hero">'+avatarHtml('large')+'<div><div class="eyebrow">QuizLab · Sgiungla Edition</div><h1>'+(p.displayName?'Ciao, '+esc(p.displayName.split(' ')[0])+' 👋':'Benvenuto nella Sgiungla 🌴')+'</h1><p class="jungle-line">'+esc(p.motto||'La giungla universitaria è sotto controllo.')+'</p></div></div><div class="actions"><button class="btn" data-action="import">📥 Importa materia / backup</button><button class="btn secondary" data-action="backup" '+(rows.length?'':'disabled')+'>💾 Backup mobile</button><button class="btn ghost" data-action="profile">👤 Profilo</button></div></section>';
  if(!rows.length)html+='<section class="card empty"><strong>Nessuna materia.</strong><p>Importa il JSON “banca COMPLETA” esportato dal desktop.</p></section>';
  for(const [id,c] of rows){const m=metrics(c);html+='<section class="card"><div class="eyebrow">Materia</div><div class="subject-name">'+esc(c.subject||id)+'</div><div class="bank-total"><span>Domande in banca</span><strong>'+m.total+'</strong></div><div class="pill-row"><span class="pill off">'+m.official+' ufficiali</span><span class="pill ai">'+m.ai+' AI</span><span class="pill">'+m.attempted+' affrontate</span></div><div class="stats"><div class="stat"><span>Copertura</span><strong>'+pct(m.coverage)+'</strong></div><div class="stat"><span>Accuratezza</span><strong>'+pct(m.accuracy)+'</strong></div></div><div class="actions"><button class="btn" data-action="open" data-id="'+esc(id)+'">Apri</button><button class="btn secondary" data-action="export" data-id="'+esc(id)+'">Esporta</button></div></section>';}
- html+='<section class="card"><h3 class="section-title">Sincronizzazione</h3><p class="subtle">Per ora questa DEV lavora solo in locale. Il cloud verrà aggiunto dopo, senza toccare la stable.</p></section></div>';
+ html+='<section class="card"><h3 class="section-title">Sincronizzazione</h3><p class="subtle">'+(cloudState.user?'Cloud collegato al tuo account. I progressi restano disponibili anche in locale.':'Questa DEV continua a funzionare in locale; puoi collegare il cloud dal pulsante in alto.')+'</p></section></div>';
  page(html);
 }
 
@@ -267,6 +267,44 @@ if(a==='sign-in'){
 }
 if(a==='sign-out'){await sync.signOut();toast('Disconnesso dal cloud');return;}
 if(a==='push-profile'){try{await sync.upsertProfile(store.profile);store.sync.profileDirty=false;store.sync.lastPushAt=now();await saveStore(store);toast('Profilo sincronizzato ☁️');cloudPage();}catch(e){alert(e.message||e);}return;}
+if(a==='sync-all'){
+ try{
+  if(!cloudState.user){toast('Accedi prima al cloud');return;}
+  const result=await sync.syncNow({
+    dirtyCourseIds:[...(store.sync?.dirtyCourseIds||[])],
+    courses:store.courses,
+    clientId:store.sync?.clientId
+  });
+  for(const remote of result.pull?.courses||[]){
+    const local=shape(store.courses[remote.courseId]||emptyCourse(remote.subject||remote.courseId));
+    const bank=remote.bank||{},progress=remote.progress||{};
+    store.courses[remote.courseId]=shape({
+      ...local,
+      subject:remote.subject||local.subject,
+      officialBank:Array.isArray(bank.officialBank)?bank.officialBank:local.officialBank,
+      aiBank:Array.isArray(bank.aiBank)?bank.aiBank:local.aiBank,
+      topicMap:bank.topicMap??local.topicMap,
+      aiWorkflow:bank.aiWorkflow||local.aiWorkflow,
+      attempts:Array.isArray(progress.attempts)?progress.attempts:local.attempts,
+      exams:Array.isArray(progress.exams)?progress.exams:local.exams,
+      marked:Array.isArray(progress.marked)?progress.marked:local.marked,
+      pendingReview:Array.isArray(progress.pendingReview)?progress.pendingReview:local.pendingReview,
+      historicalWrong:Array.isArray(progress.historicalWrong)?progress.historicalWrong:local.historicalWrong,
+      fullCampaign:progress.fullCampaign||local.fullCampaign,
+      createdAt:progress.createdAt||bank.createdAt||local.createdAt,
+      updatedAt:progress.updatedAt||bank.updatedAt||remote.updatedAt||local.updatedAt
+    });
+  }
+  store.sync.dirtyCourseIds=[];
+  store.sync.lastPushAt=now();
+  store.sync.lastPullAt=now();
+  await saveStore(store);
+  toast('Sincronizzazione completa ☁️');
+  cloudPage();
+ }catch(e){alert('Sincronizzazione non riuscita:\n'+(e?.message||e));}
+ return;
+}
+
 
 if(a==='avatar-pick'){document.getElementById('avatarPicker')?.click();return;}
 if(a==='save-profile'){store.profile.displayName=norm(document.getElementById('profileName')?.value).slice(0,60);store.profile.motto=norm(document.getElementById('profileMotto')?.value).slice(0,120)||'La giungla universitaria è sotto controllo.';store.profile.updatedAt=now();store.sync.profileDirty=true;store.sync.lastLocalChangeAt=now();await saveStore(store);if(cloudState.user){try{await sync.upsertProfile(store.profile);store.sync.profileDirty=false;store.sync.lastPushAt=now();await saveStore(store);}catch(e){console.warn(e);}}toast('Profilo salvato 🌴');profilePage();return;}
