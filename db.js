@@ -38,6 +38,7 @@ export function emptySyncState(){
     ownerId:'local:'+clientId,
     dirtyCourseIds:[],
     dirtyBankCourseIds:[],
+    hiddenCourseIds:[],
     profileDirty:false,
     lastLocalChangeAt:null,
     lastPushAt:null,
@@ -66,6 +67,7 @@ export function shapeStore(input){
   store.sync={...base.sync,...(store.sync||{})};
   if(!Array.isArray(store.sync.dirtyCourseIds)) store.sync.dirtyCourseIds=[];
   if(!Array.isArray(store.sync.dirtyBankCourseIds)) store.sync.dirtyBankCourseIds=[];
+  if(!Array.isArray(store.sync.hiddenCourseIds)) store.sync.hiddenCourseIds=[];
   if(!store.sync.clientId) store.sync.clientId=uid();
   if(!store.sync.ownerId) store.sync.ownerId='local:'+store.sync.clientId;
   return store;
