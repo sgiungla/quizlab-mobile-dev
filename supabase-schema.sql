@@ -50,35 +50,49 @@ alter table public.quizlab_devices enable row level security;
 
 drop policy if exists "profiles_own_select" on public.quizlab_profiles;
 create policy "profiles_own_select" on public.quizlab_profiles
-for select using (auth.uid() = user_id);
+for select to authenticated using (auth.uid() = user_id);
 
 drop policy if exists "profiles_own_write" on public.quizlab_profiles;
 create policy "profiles_own_write" on public.quizlab_profiles
-for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+for all to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 drop policy if exists "banks_owner_or_shared_select" on public.quizlab_banks;
 create policy "banks_owner_or_shared_select" on public.quizlab_banks
-for select using (auth.uid() = owner_id or is_shared = true);
+for select to authenticated using (auth.uid() = owner_id or is_shared = true);
 
 drop policy if exists "banks_owner_insert" on public.quizlab_banks;
 create policy "banks_owner_insert" on public.quizlab_banks
-for insert with check (auth.uid() = owner_id);
+for insert to authenticated with check (auth.uid() = owner_id);
 
 drop policy if exists "banks_owner_update" on public.quizlab_banks;
 create policy "banks_owner_update" on public.quizlab_banks
-for update using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
+for update to authenticated using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
 
 drop policy if exists "banks_owner_delete" on public.quizlab_banks;
 create policy "banks_owner_delete" on public.quizlab_banks
-for delete using (auth.uid() = owner_id);
+for delete to authenticated using (auth.uid() = owner_id);
 
 drop policy if exists "user_courses_own" on public.quizlab_user_courses;
 create policy "user_courses_own" on public.quizlab_user_courses
-for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+for all to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 drop policy if exists "devices_own" on public.quizlab_devices;
 create policy "devices_own" on public.quizlab_devices
-for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+for all to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 create index if not exists quizlab_banks_course_idx on public.quizlab_banks(course_id);
 create index if not exists quizlab_user_courses_user_idx on public.quizlab_user_courses(user_id);
+
+
+-- Data API access: this project has "Automatically expose new tables" disabled.
+-- RLS remains the row-level gate; only signed-in users get table privileges.
+grant select, insert, update, delete on table public.quizlab_profiles to authenticated;
+grant select, insert, update, delete on table public.quizlab_banks to authenticated;
+grant select, insert, update, delete on table public.quizlab_user_courses to authenticated;
+grant select, insert, update, delete on table public.quizlab_devices to authenticated;
+
+-- Keep anonymous clients out of application data.
+revoke all on table public.quizlab_profiles from anon;
+revoke all on table public.quizlab_banks from anon;
+revoke all on table public.quizlab_user_courses from anon;
+revoke all on table public.quizlab_devices from anon;
