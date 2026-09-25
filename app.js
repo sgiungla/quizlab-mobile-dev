@@ -12,6 +12,8 @@ let session=null;
 let toastTimer=null;
 let examTimer=null;
 let cloudState={status:'local-only',user:null};
+let autoSyncTimer=null;
+let syncInFlight=false;
 
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const norm=s=>String(s??'').replace(/\s+/g,' ').trim();
@@ -38,12 +40,15 @@ function shape(c){
  return x;
 }
 function course(id=route.courseId){return id&&store.courses[id]?shape(store.courses[id]):null;}
-function saveCourse(id,c){
+async function saveCourse(id,c,{bankDirty=false}={}){
  c.updatedAt=now();store.courses[id]=c;
  store.sync=store.sync||{};
  store.sync.dirtyCourseIds=uniq([...(store.sync.dirtyCourseIds||[]),id]);
+ if(bankDirty)store.sync.dirtyBankCourseIds=uniq([...(store.sync.dirtyBankCourseIds||[]),id]);
  store.sync.lastLocalChangeAt=now();
- return saveStore(store);
+ const saved=await saveStore(store);
+ scheduleAutoSync();
+ return saved;
 }
 function latestMap(c){const m=new Map();for(const a of c.attempts||[]){const p=m.get(a.questionId);if(!p||String(a.at)>=String(p.at))m.set(a.questionId,a);}return m;}
 function metrics(c){
@@ -106,7 +111,7 @@ function home(){
  let html='<div class="stack"><section class="card hero jungle-hero"><div class="profile-hero">'+avatarHtml('large')+'<div><div class="eyebrow">QuizLab · Sgiungla Edition</div><h1>'+(p.displayName?'Ciao, '+esc(p.displayName.split(' ')[0])+' 👋':'Benvenuto nella Sgiungla 🌴')+'</h1><p class="jungle-line">'+esc(p.motto||'La giungla universitaria è sotto controllo.')+'</p></div></div><div class="actions"><button class="btn" data-action="import">📥 Importa materia / backup</button><button class="btn secondary" data-action="backup" '+(rows.length?'':'disabled')+'>💾 Backup mobile</button><button class="btn ghost" data-action="profile">👤 Profilo</button></div></section>';
  if(!rows.length)html+='<section class="card empty"><strong>Nessuna materia.</strong><p>Importa il JSON “banca COMPLETA” esportato dal desktop.</p></section>';
  for(const [id,c] of rows){const m=metrics(c);html+='<section class="card"><div class="eyebrow">Materia</div><div class="subject-name">'+esc(c.subject||id)+'</div><div class="bank-total"><span>Domande in banca</span><strong>'+m.total+'</strong></div><div class="pill-row"><span class="pill off">'+m.official+' ufficiali</span><span class="pill ai">'+m.ai+' AI</span><span class="pill">'+m.attempted+' affrontate</span></div><div class="stats"><div class="stat"><span>Copertura</span><strong>'+pct(m.coverage)+'</strong></div><div class="stat"><span>Accuratezza</span><strong>'+pct(m.accuracy)+'</strong></div></div><div class="actions"><button class="btn" data-action="open" data-id="'+esc(id)+'">Apri</button><button class="btn secondary" data-action="export" data-id="'+esc(id)+'">Esporta</button></div></section>';}
- html+='<section class="card"><h3 class="section-title">Sincronizzazione</h3><p class="subtle">'+(cloudState.user?'Cloud collegato al tuo account. I progressi restano disponibili anche in locale.':'Questa DEV continua a funzionare in locale; puoi collegare il cloud dal pulsante in alto.')+'</p></section></div>';
+ html+='<section class="card"><h3 class="section-title">Sincronizzazione</h3><p class="subtle">'+(cloudState.user?'Cloud collegato · sincronizzazione automatica attiva. I progressi restano disponibili anche offline.':'Questa DEV continua a funzionare in locale; puoi collegare il cloud dal pulsante in alto.')+'</p></section></div>';
  page(html);
 }
 
@@ -203,6 +208,59 @@ async function handleAvatar(e){
  const reader=new FileReader();reader.onload=async()=>{store.profile.avatarDataUrl=String(reader.result||'');store.profile.updatedAt=now();store.sync.profileDirty=true;store.sync.lastLocalChangeAt=now();await saveStore(store);toast('Foto profilo aggiornata');profilePage();};reader.readAsDataURL(f);
 }
 
+function mergeRemoteCourses(rows=[]){
+ for(const remote of rows){
+  const local=shape(store.courses[remote.courseId]||emptyCourse(remote.subject||remote.courseId));
+  const bank=remote.bank||{},progress=remote.progress||{};
+  store.courses[remote.courseId]=shape({
+    ...local,
+    subject:remote.subject||local.subject,
+    officialBank:Array.isArray(bank.officialBank)?bank.officialBank:local.officialBank,
+    aiBank:Array.isArray(bank.aiBank)?bank.aiBank:local.aiBank,
+    topicMap:bank.topicMap??local.topicMap,
+    aiWorkflow:bank.aiWorkflow||local.aiWorkflow,
+    attempts:Array.isArray(progress.attempts)?progress.attempts:local.attempts,
+    exams:Array.isArray(progress.exams)?progress.exams:local.exams,
+    marked:Array.isArray(progress.marked)?progress.marked:local.marked,
+    pendingReview:Array.isArray(progress.pendingReview)?progress.pendingReview:local.pendingReview,
+    historicalWrong:Array.isArray(progress.historicalWrong)?progress.historicalWrong:local.historicalWrong,
+    fullCampaign:progress.fullCampaign||local.fullCampaign,
+    createdAt:progress.createdAt||bank.createdAt||local.createdAt,
+    updatedAt:progress.updatedAt||bank.updatedAt||remote.updatedAt||local.updatedAt
+  });
+ }
+}
+async function cloudSync({silent=true}={}){
+ if(syncInFlight||!cloudState.user||!navigator.onLine)return false;
+ syncInFlight=true;
+ try{
+  const result=await sync.syncNow({
+   dirtyCourseIds:[...(store.sync?.dirtyCourseIds||[])],
+   dirtyBankCourseIds:[...(store.sync?.dirtyBankCourseIds||[])],
+   courses:store.courses,
+   clientId:store.sync?.clientId
+  });
+  mergeRemoteCourses(result.pull?.courses||[]);
+  store.sync.dirtyCourseIds=[];
+  store.sync.dirtyBankCourseIds=[];
+  store.sync.lastPushAt=now();
+  store.sync.lastPullAt=now();
+  store.sync.mode='cloud-online';
+  await saveStore(store);
+  if(!silent)toast('Sincronizzazione completa ☁️');
+  render();
+  return true;
+ }catch(e){
+  console.warn('Cloud sync',e);
+  if(!silent)alert('Sincronizzazione non riuscita:\n'+(e?.message||e));
+  return false;
+ }finally{syncInFlight=false;}
+}
+function scheduleAutoSync(){
+ if(!cloudState.user||!navigator.onLine)return;
+ clearTimeout(autoSyncTimer);
+ autoSyncTimer=setTimeout(()=>cloudSync({silent:true}),1400);
+}
 async function startCloud(){
  try{
   cloudState=await sync.start({
@@ -210,11 +268,17 @@ async function startCloud(){
    onAuthChange:async ({session,status})=>{
     cloudState={status,user:session?.user||null};
     store.sync.mode=status;
-    store.sync.ownerId=session?.user?.id||store.sync.ownerId;
+    if(session?.user)store.sync.ownerId=session.user.id;
     await saveStore(store);
     render();
+    if(session?.user)setTimeout(()=>cloudSync({silent:true}),0);
    }
   });
+  if(cloudState.user){
+    store.sync.ownerId=cloudState.user.id;
+    await saveStore(store);
+    await cloudSync({silent:true});
+  }
  }catch(e){
   cloudState={status:'cloud-error',user:null};
   console.warn('Cloud init',e);
@@ -229,7 +293,7 @@ function cloudPage(){
  }else if(!user){
   body+='<section class="card"><h2 class="section-title">Account</h2><label>Email<input id="authEmail" type="email" autocomplete="email"></label><label>Password<input id="authPassword" type="password" autocomplete="current-password" minlength="8"></label><div class="actions"><button class="btn" data-action="sign-in">Accedi</button><button class="btn secondary" data-action="sign-up">Crea account</button></div><button class="btn ghost" data-action="reset-cloud-config">Cambia configurazione cloud</button></section>';
  }else{
-  body+='<section class="card"><h2 class="section-title">Sincronizzazione</h2><div class="sync-panel"><div><span>Account</span><strong>'+esc(user.email||user.id)+'</strong></div><div><span>Stato</span><strong>Cloud collegato</strong></div><div><span>Dati locali da sincronizzare</span><strong>'+((store.sync?.dirtyCourseIds||[]).length)+' materie</strong></div></div><div class="actions"><button class="btn" data-action="sync-all">Sincronizza tutto</button><button class="btn secondary" data-action="push-profile">Sincronizza profilo</button><button class="btn ghost" data-action="sign-out">Esci</button></div><p class="subtle">Sincronizza tutto carica banca e progressi locali nel tuo account e poi riallinea i dati cloud sul dispositivo.</p></section>';
+  body+='<section class="card"><h2 class="section-title">Sincronizzazione</h2><div class="sync-panel"><div><span>Account</span><strong>'+esc(user.email||user.id)+'</strong></div><div><span>Stato</span><strong>Cloud collegato</strong></div><div><span>Dati locali da sincronizzare</span><strong>'+((store.sync?.dirtyCourseIds||[]).length)+' materie</strong></div></div><div class="actions"><button class="btn" data-action="sync-all">Sincronizza tutto</button><button class="btn secondary" data-action="push-profile">Sincronizza profilo</button><button class="btn ghost" data-action="sign-out">Esci</button></div><p class="subtle">La sincronizzazione è automatica. Il pulsante serve solo per forzarla subito manualmente.</p></section>';
  }
  body+='</div>';page(body,'Cloud','Account e sync',true);
 }
@@ -239,7 +303,7 @@ function updateSearch(){const r=searchMatches(),box=document.getElementById('sea
 
 function normalizeQuestion(raw,source){if(!raw||typeof raw!=='object')return null;const options=(raw.options||[]).map((o,i)=>({letter:norm(o?.letter||['A','B','C','D'][i]).toUpperCase(),optionId:norm(o?.optionId||o?.id||('opt_'+(i+1))),text:norm(o?.text??o)})).filter(o=>/^[A-D]$/.test(o.letter)&&o.text);let correct=norm(raw.correct||raw.correctAnswer).toUpperCase();const coi=norm(raw.correctOptionId||raw.correct_option_id);if(coi){const m=options.find(o=>o.optionId===coi);if(m)correct=m.letter;}const chapter=Number(raw.chapter||raw.chapterNumber||0),text=norm(raw.text||raw.question);if(!raw.id||!chapter||!text||options.length!==4||!/^[A-D]$/.test(correct))return null;return {...raw,id:norm(raw.id),source,chapter,text,options,correct,correctOptionId:coi||options.find(o=>o.letter===correct)?.optionId||'',explanation:norm(raw.explanation||raw.spiegazione),reference:norm(raw.reference||raw.fonte||''),difficulty:['easy','medium','hard'].includes(String(raw.difficulty||'').toLowerCase())?String(raw.difficulty).toLowerCase():'medium'};}
 function mergeById(oldRows,newRows){const m=new Map((oldRows||[]).map(q=>[q.id,q]));for(const q of newRows)m.set(q.id,{...(m.get(q.id)||{}),...q});return [...m.values()];}
-async function importPack(p){if(!p||typeof p!=='object')throw new Error('JSON non valido');if(p.schema===BACKUP_SCHEMA){if(!p.store?.courses)throw new Error('Backup non valido');store=p.store;for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await saveStore(store);return 'Backup ripristinato';}if(p.schema!==BANK_SCHEMA)throw new Error('Serve una Banca QuizLab COMPLETA o un Backup QuizLab.');const id=norm(p.course?.courseId),subject=norm(p.course?.subject||id);if(!id)throw new Error('Manca course.courseId');const off=(p.officialBank||[]).map(q=>normalizeQuestion(q,'official')).filter(Boolean),ai=(p.aiBank||[]).map(q=>normalizeQuestion(q,'ai')).filter(Boolean);if(!off.length&&!ai.length)throw new Error('Nessuna domanda valida');const c=shape(store.courses[id]||emptyCourse(subject));c.subject=subject;c.officialBank=mergeById(c.officialBank,off);c.aiBank=mergeById(c.aiBank,ai);if(p.topicMap)c.topicMap=p.topicMap;if(p.aiWorkflow)c.aiWorkflow={...c.aiWorkflow,...p.aiWorkflow};await saveCourse(id,c);return subject+': '+off.length+' ufficiali · '+ai.length+' AI';}
+async function importPack(p){if(!p||typeof p!=='object')throw new Error('JSON non valido');if(p.schema===BACKUP_SCHEMA){if(!p.store?.courses)throw new Error('Backup non valido');store=p.store;for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await saveStore(store);return 'Backup ripristinato';}if(p.schema!==BANK_SCHEMA)throw new Error('Serve una Banca QuizLab COMPLETA o un Backup QuizLab.');const id=norm(p.course?.courseId),subject=norm(p.course?.subject||id);if(!id)throw new Error('Manca course.courseId');const off=(p.officialBank||[]).map(q=>normalizeQuestion(q,'official')).filter(Boolean),ai=(p.aiBank||[]).map(q=>normalizeQuestion(q,'ai')).filter(Boolean);if(!off.length&&!ai.length)throw new Error('Nessuna domanda valida');const c=shape(store.courses[id]||emptyCourse(subject));c.subject=subject;c.officialBank=mergeById(c.officialBank,off);c.aiBank=mergeById(c.aiBank,ai);if(p.topicMap)c.topicMap=p.topicMap;if(p.aiWorkflow)c.aiWorkflow={...c.aiWorkflow,...p.aiWorkflow};await saveCourse(id,c,{bankDirty:true});return subject+': '+off.length+' ufficiali · '+ai.length+' AI';}
 function exportCourse(id){const c=course(id);if(!c)return;download(fileName(c.subject)+'_QuizLab_banca_COMPLETA_mobile.json',{schema:BANK_SCHEMA,version:2,exportedAt:now(),course:{courseId:id,subject:c.subject},officialBank:c.officialBank,aiBank:c.aiBank,topicMap:c.topicMap,aiWorkflow:c.aiWorkflow});}
 function backup(){download('QuizLab_Mobile_BACKUP_'+new Date().toISOString().slice(0,10)+'.json',{schema:BACKUP_SCHEMA,version:1,exportedAt:now(),store});}
 
@@ -267,43 +331,7 @@ if(a==='sign-in'){
 }
 if(a==='sign-out'){await sync.signOut();toast('Disconnesso dal cloud');return;}
 if(a==='push-profile'){try{await sync.upsertProfile(store.profile);store.sync.profileDirty=false;store.sync.lastPushAt=now();await saveStore(store);toast('Profilo sincronizzato ☁️');cloudPage();}catch(e){alert(e.message||e);}return;}
-if(a==='sync-all'){
- try{
-  if(!cloudState.user){toast('Accedi prima al cloud');return;}
-  const result=await sync.syncNow({
-    dirtyCourseIds:[...(store.sync?.dirtyCourseIds||[])],
-    courses:store.courses,
-    clientId:store.sync?.clientId
-  });
-  for(const remote of result.pull?.courses||[]){
-    const local=shape(store.courses[remote.courseId]||emptyCourse(remote.subject||remote.courseId));
-    const bank=remote.bank||{},progress=remote.progress||{};
-    store.courses[remote.courseId]=shape({
-      ...local,
-      subject:remote.subject||local.subject,
-      officialBank:Array.isArray(bank.officialBank)?bank.officialBank:local.officialBank,
-      aiBank:Array.isArray(bank.aiBank)?bank.aiBank:local.aiBank,
-      topicMap:bank.topicMap??local.topicMap,
-      aiWorkflow:bank.aiWorkflow||local.aiWorkflow,
-      attempts:Array.isArray(progress.attempts)?progress.attempts:local.attempts,
-      exams:Array.isArray(progress.exams)?progress.exams:local.exams,
-      marked:Array.isArray(progress.marked)?progress.marked:local.marked,
-      pendingReview:Array.isArray(progress.pendingReview)?progress.pendingReview:local.pendingReview,
-      historicalWrong:Array.isArray(progress.historicalWrong)?progress.historicalWrong:local.historicalWrong,
-      fullCampaign:progress.fullCampaign||local.fullCampaign,
-      createdAt:progress.createdAt||bank.createdAt||local.createdAt,
-      updatedAt:progress.updatedAt||bank.updatedAt||remote.updatedAt||local.updatedAt
-    });
-  }
-  store.sync.dirtyCourseIds=[];
-  store.sync.lastPushAt=now();
-  store.sync.lastPullAt=now();
-  await saveStore(store);
-  toast('Sincronizzazione completa ☁️');
-  cloudPage();
- }catch(e){alert('Sincronizzazione non riuscita:\n'+(e?.message||e));}
- return;
-}
+if(a==='sync-all'){await cloudSync({silent:false});return;}
 
 
 if(a==='avatar-pick'){document.getElementById('avatarPicker')?.click();return;}
