@@ -10,7 +10,7 @@ create table if not exists public.quizlab_admins (
 
 create table if not exists public.quizlab_user_access (
   user_id uuid primary key references auth.users(id) on delete cascade,
-  status text not null default 'active' check (status in ('active','suspended')),
+  status text not null default 'pending' check (status in ('pending','active','suspended')),
   note text,
   updated_at timestamptz not null default now()
 );
@@ -52,10 +52,13 @@ stable
 security definer
 set search_path = public, auth
 as $$
-  select coalesce(
-    (select ua.status from public.quizlab_user_access ua where ua.user_id = auth.uid()),
-    'active'
-  );
+  select case
+    when public.quizlab_is_admin() then 'active'
+    else coalesce(
+      (select ua.status from public.quizlab_user_access ua where ua.user_id = auth.uid()),
+      'pending'
+    )
+  end;
 $$;
 
 create or replace function public.quizlab_access_allowed()
@@ -175,7 +178,7 @@ begin
     u.created_at,
     u.last_sign_in_at,
     max(d.last_seen),
-    coalesce(max(ua.status),'active')::text,
+    case when bool_or(a.user_id is not null) then 'active' else coalesce(max(ua.status),'pending') end::text,
     count(distinct uc.bank_id)::bigint,
     coalesce(sum(
       case when jsonb_typeof(uc.progress_json->'attempts') = 'array'
@@ -188,6 +191,7 @@ begin
   from auth.users u
   left join public.quizlab_devices d on d.user_id = u.id
   left join public.quizlab_user_access ua on ua.user_id = u.id
+  left join public.quizlab_admins a on a.user_id = u.id
   left join public.quizlab_user_courses uc on uc.user_id = u.id
   group by u.id,u.email,u.created_at,u.last_sign_in_at
   order by max(d.last_seen) desc nulls last, u.created_at desc;
@@ -207,7 +211,7 @@ begin
   if not public.quizlab_is_admin() then
     raise exception 'forbidden' using errcode = '42501';
   end if;
-  if new_status not in ('active','suspended') then
+  if new_status not in ('pending','active','suspended') then
     raise exception 'invalid status';
   end if;
   if target_user = auth.uid() and new_status = 'suspended' then
@@ -229,6 +233,32 @@ revoke all on function public.quizlab_admin_set_user_status(uuid,text) from publ
 grant execute on function public.quizlab_admin_storage_overview() to authenticated;
 grant execute on function public.quizlab_admin_user_overview() to authenticated;
 grant execute on function public.quizlab_admin_set_user_status(uuid,text) to authenticated;
+
+create or replace function public.quizlab_register_pending_user()
+returns text
+language plpgsql
+security definer
+set search_path = public, auth
+as $
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated' using errcode = '42501';
+  end if;
+
+  if public.quizlab_is_admin() then
+    return 'active';
+  end if;
+
+  insert into public.quizlab_user_access(user_id,status,updated_at)
+  values(auth.uid(),'pending',now())
+  on conflict(user_id) do nothing;
+
+  return public.quizlab_account_status();
+end;
+$;
+
+revoke all on function public.quizlab_register_pending_user() from public;
+grant execute on function public.quizlab_register_pending_user() to authenticated;
 
 -- DOPO aver copiato l'UUID del tuo account, esegui UNA VOLTA:
 -- insert into public.quizlab_admins(user_id) values ('INCOLLA-QUI-IL-TUO-UUID') on conflict do nothing;
