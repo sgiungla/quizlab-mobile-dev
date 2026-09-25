@@ -95,6 +95,37 @@ export class QuizLabSyncAdapter {
     return {status:status||'pending',isAdmin:Boolean(isAdmin)};
   }
 
+  async ensurePendingRegistration(){
+    this.requireUser();
+    const {data,error}=await this.client.rpc('quizlab_register_pending_user');
+    if(error){
+      if(error.code==='42883') return 'active';
+      throw error;
+    }
+    return data||'pending';
+  }
+
+  async adminUserOverview(){
+    this.requireUser();
+    const {data,error}=await this.client.rpc('quizlab_admin_user_overview');
+    if(error) throw error;
+    return data||[];
+  }
+
+  async adminStorageOverview(){
+    this.requireUser();
+    const {data,error}=await this.client.rpc('quizlab_admin_storage_overview');
+    if(error) throw error;
+    return Array.isArray(data)?(data[0]||null):data;
+  }
+
+  async adminSetUserStatus(userId,status){
+    this.requireUser();
+    const {data,error}=await this.client.rpc('quizlab_admin_set_user_status',{target_user:userId,new_status:status});
+    if(error) throw error;
+    return data;
+  }
+
   bankPayload(course={}){
     return {
       officialBank:Array.isArray(course.officialBank)?course.officialBank:[],
