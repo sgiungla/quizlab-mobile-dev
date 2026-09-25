@@ -209,7 +209,7 @@ async function confirmAnswer(){
  else if(session.mode==='review'){c.pendingReview=c.pendingReview.filter(id=>id!==q.id);}
  await saveCourse(route.courseId,c);render();
 }
-function nextQuestion(){if(session.index<session.questions.length-1){session.index++;session.questionShownAt=Date.now();render();}else{route.name='results';render();}}
+async function nextQuestion(){if(session.index<session.questions.length-1){session.index++;session.questionShownAt=Date.now();render();}else{await cloudSync({silent:true});route.name='results';render();}}
 async function confirmExamAnswer(){
  if(!session||session.mode!=='exam')return;
  const c=course(),q=current(),a=session.answers[q.id];if(!a?.selected||a.confirmed)return;
@@ -226,7 +226,7 @@ async function finishExam(timeout=false){
  session.questions.forEach((q,i)=>{const a=session.answers[q.id],ok=!!a?.selected&&a.selected===q.correct,isLode=i===30;if(!isLode&&ok)correct++;if(isLode)lodeCorrect=ok;if(!ok)wrong.push(q.id);});
  const grade=correct,lode=correct===30&&lodeCorrect,elapsedMs=Date.now()-session.startedAt;
  c.exams.push({at:now(),grade,lode,correct30:correct,lodeCorrect,elapsedMs,timeout,wrongIds:wrong,questionIds:session.questions.map(q=>q.id),answeredCount:Object.values(session.answers).filter(a=>a?.selected).length});
- await saveCourse(route.courseId,c);session.examResult={grade,lode,correct,elapsedMs,wrong};route.name='results';render();
+ await saveCourse(route.courseId,c);session.examResult={grade,lode,correct,elapsedMs,wrong};await cloudSync({silent:true});route.name='results';render();
 }
 function results(){if(session?.mode==='exam'){const r=session.examResult;if(!r)return;page('<section class="card hero"><div class="eyebrow">🎓 Esito simulazione</div><h1>'+(r.lode?'30 e lode':r.grade+'/30')+'</h1><p>'+r.correct+'/30 corrette · '+fmtDuration(r.elapsedMs)+'</p><div class="actions"><button class="btn" data-action="dashboard">Dashboard</button><button class="btn secondary" data-action="retry-wrong">Ripassa gli errori</button></div></section>',course().subject,'Risultati',true);return;}const done=Object.entries(session.answers).filter(([,a])=>a.confirmed),ok=done.filter(([,a])=>a.correct).length,total=done.length;page('<section class="card hero"><div class="eyebrow">Sessione completata</div><h1>'+fmtGrade(gradeFromRatio(ok,total))+'</h1><p>'+ok+' / '+total+' · '+pct(total?ok/total:0)+' corrette</p><div class="actions"><button class="btn" data-action="dashboard">Torna alla materia</button><button class="btn secondary" data-action="retry-wrong">Ripassa gli errori</button></div></section>',course().subject,'Risultati',true);}
 
@@ -383,7 +383,7 @@ if(a==='start-full'){const c=course(),src=document.getElementById('fullSource').
 if(a==='reset-cycle'){resetCycle();return;}
 if(a==='exam'||a==='start-exam'){const c=course(),qs=selectTraining(qbank(c),31,'mixed');startSession(qs,'Simulazione esame','exam');return;}
 if(a==='answer'){const q=current();if(!q)return;session.answers[q.id]={...(session.answers[q.id]||{}),selected:b.dataset.letter};render();return;}
-if(a==='confirm'){await confirmAnswer();return;}if(a==='next'){nextQuestion();return;}
+if(a==='confirm'){await confirmAnswer();return;}if(a==='next'){await nextQuestion();return;}
 if(a==='exam-prev'){if(session.index>0){session.index--;session.questionShownAt=Date.now();render();}return;}
 if(a==='exam-next'){
  await confirmExamAnswer();
@@ -391,7 +391,7 @@ if(a==='exam-next'){
  else{session.index++;session.questionShownAt=Date.now();render();}
  return;
 }
-if(a==='study-prev'){if(session.index>0){session.index--;render();}return;}if(a==='study-next'){if(session.index>=session.questions.length-1){setRoute('dashboard');}else{session.index++;render();}return;}
+if(a==='study-prev'){if(session.index>0){session.index--;render();}return;}if(a==='study-next'){if(session.index>=session.questions.length-1){await cloudSync({silent:true});setRoute('dashboard');}else{session.index++;render();}return;}
 if(a==='mark'){const c=course(),q=current(),set=new Set(c.marked);set.has(q.id)?set.delete(q.id):set.add(q.id);c.marked=[...set];await saveCourse(route.courseId,c);render();return;}
 if(a==='dashboard'){setRoute('dashboard');return;}
 if(a==='retry-wrong'){const c=course(),by=new Map(qbank(c).map(q=>[q.id,q])),ids=session.mode==='exam'?(session.examResult?.wrong||[]):Object.entries(session.answers).filter(([,v])=>v.confirmed&&!v.correct).map(([id])=>id),qs=ids.map(id=>by.get(id)).filter(Boolean);startSession(qs,'Errori sessione','review');return;}
