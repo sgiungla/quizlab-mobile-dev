@@ -390,11 +390,18 @@ async function startCloud(){
     if(session?.user)store.sync.ownerId=session.user.id;
     await saveStore(store);
     if(session?.user){
-      await hydrateCloudProfile();
-      await cloudSync({silent:true});
-      route.name='home';
-    }else if(sync.configured(store.settings||{})){
-      route.name='cloud';
+      try{await sync.ensurePendingRegistration();}catch(e){console.warn('Pending registration',e);}
+      try{accessState=await sync.accessState();}catch(e){accessState={status:'active',isAdmin:false,legacy:true};console.warn('Access state',e);}
+      if(accessState.status==='active'){
+        await hydrateCloudProfile();
+        await cloudSync({silent:true});
+        route.name='home';
+      }else{
+        route.name='access';
+      }
+    }else{
+      accessState={status:'active',isAdmin:false,legacy:true};
+      if(sync.configured(store.settings||{}))route.name='cloud';
     }
     render();
    }
@@ -402,13 +409,47 @@ async function startCloud(){
   if(cloudState.user){
     store.sync.ownerId=cloudState.user.id;
     await saveStore(store);
-    await hydrateCloudProfile();
-    await cloudSync({silent:true});
+    try{await sync.ensurePendingRegistration();}catch(e){console.warn('Pending registration',e);}
+    try{accessState=await sync.accessState();}catch(e){accessState={status:'active',isAdmin:false,legacy:true};console.warn('Access state',e);}
+    if(accessState.status==='active'){
+      await hydrateCloudProfile();
+      await cloudSync({silent:true});
+    }else{
+      route.name='access';
+    }
   }
  }catch(e){
   cloudState={status:'cloud-error',user:null};
   console.warn('Cloud init',e);
  }
+}
+function accessPage(){
+ const pending=accessState.status==='pending';
+ const title=pending?'Richiesta inviata ⏳':'Account sospeso ⛔';
+ const text=pending?'Il tuo account è stato creato correttamente. Ora deve essere approvato dall’amministratore di QuizLab.':'Questo account è stato sospeso dall’amministratore. I dati locali restano sul dispositivo ma il cloud è bloccato.';
+ page('<div class="stack"><section class="card hero jungle-hero"><div class="eyebrow">Accesso QuizLab</div><h1>'+title+'</h1><p class="subtle">'+text+'</p><div class="pill-row"><span class="pill '+(pending?'warn-pill':'')+'">'+esc(accessState.status)+'</span></div><div class="actions"><button class="btn secondary" data-action="refresh-access">Aggiorna stato</button><button class="btn ghost" data-action="sign-out">Esci</button></div></section></div>','QuizLab','Accesso',false);
+}
+async function refreshAdminData(){
+ if(!accessState.isAdmin)return;
+ const [users,storage]=await Promise.all([sync.adminUserOverview(),sync.adminStorageOverview()]);
+ adminData={users,storage,loaded:true};
+}
+function adminPage(){
+ if(!accessState.isAdmin)return setRoute('home',null);
+ const users=adminData.users||[],storage=adminData.storage||{};
+ const pending=users.filter(u=>u.account_status==='pending').length;
+ const active=users.filter(u=>u.account_status==='active').length;
+ const suspended=users.filter(u=>u.account_status==='suspended').length;
+ const rows=users.map(u=>{
+   const st=u.account_status||'pending';
+   const actions=st==='pending'
+     ?'<button class="btn compact-btn" data-action="admin-status" data-user="'+esc(u.user_id)+'" data-status="active">Approva</button><button class="btn ghost compact-btn" data-action="admin-status" data-user="'+esc(u.user_id)+'" data-status="suspended">Rifiuta</button>'
+     :st==='active'
+      ?'<button class="btn ghost compact-btn" data-action="admin-status" data-user="'+esc(u.user_id)+'" data-status="suspended">Sospendi</button>'
+      :'<button class="btn secondary compact-btn" data-action="admin-status" data-user="'+esc(u.user_id)+'" data-status="active">Riattiva</button>';
+   return '<div class="admin-user"><div><strong>'+esc(u.email||u.user_id)+'</strong><div class="result-meta">'+st+' · '+Number(u.course_count||0)+' materie · '+Number(u.attempt_count||0)+' tentativi · '+Number(u.exam_count||0)+' esami</div><div class="result-meta">Ultimo accesso: '+esc(u.last_sign_in_at?new Date(u.last_sign_in_at).toLocaleString('it-IT'):'—')+'</div></div><div class="actions">'+actions+'</div></div>';
+ }).join('');
+ page('<div class="stack"><section class="card hero jungle-hero"><div class="eyebrow">Amministrazione</div><h1>Cabina di controllo 🌴</h1><div class="stats"><div class="stat"><span>In attesa</span><strong>'+pending+'</strong></div><div class="stat"><span>Attivi</span><strong>'+active+'</strong></div><div class="stat"><span>Sospesi</span><strong>'+suspended+'</strong></div><div class="stat"><span>Utenti</span><strong>'+users.length+'</strong></div></div></section><section class="card"><div class="section-head"><div><div class="eyebrow">Cloud</div><h3 class="section-title">Spazio occupato</h3></div><button class="btn ghost compact-btn" data-action="admin-refresh">Aggiorna</button></div><div class="stats"><div class="stat"><span>Database</span><strong>'+fmtBytes(storage.database_bytes)+'</strong></div><div class="stat"><span>Banche JSON</span><strong>'+fmtBytes(storage.banks_json_bytes)+'</strong></div><div class="stat"><span>Progressi JSON</span><strong>'+fmtBytes(storage.progress_json_bytes)+'</strong></div><div class="stat"><span>Tabelle QuizLab</span><strong>'+fmtBytes((Number(storage.banks_table_bytes)||0)+(Number(storage.progress_table_bytes)||0))+'</strong></div></div></section><section class="card"><div class="section-head"><div><div class="eyebrow">Utenti</div><h3 class="section-title">Approvazioni e accessi</h3></div></div><div class="admin-list">'+(rows||'<div class="empty">Nessun utente.</div>')+'</div></section></div>','Admin','Controllo accessi e cloud',true);
 }
 function cloudPage(){
  const cfg=store.settings||{},user=cloudState.user;
@@ -433,7 +474,7 @@ async function importPack(p){if(!p||typeof p!=='object')throw new Error('JSON no
 function exportCourse(id){const c=course(id);if(!c)return;download(fileName(c.subject)+'_QuizLab_banca_COMPLETA_mobile.json',{schema:BANK_SCHEMA,version:2,exportedAt:now(),course:{courseId:id,subject:c.subject},officialBank:c.officialBank,aiBank:c.aiBank,topicMap:c.topicMap,aiWorkflow:c.aiWorkflow});}
 function backup(){download('QuizLab_Mobile_BACKUP_'+new Date().toISOString().slice(0,10)+'.json',{schema:BACKUP_SCHEMA,version:1,exportedAt:now(),store});}
 
-function render(){if(route.name==='home')home();else if(route.name==='dashboard')dashboard();else if(route.name==='training')training(route.presetChapter);else if(route.name==='session')sessionView();else if(route.name==='results')results();else if(route.name==='review')reviewPage();else if(route.name==='search')searchPage();else if(route.name==='profile')profilePage();else if(route.name==='cloud')cloudPage();else home();}
+function render(){if(route.name==='home')home();else if(route.name==='dashboard')dashboard();else if(route.name==='training')training(route.presetChapter);else if(route.name==='session')sessionView();else if(route.name==='results')results();else if(route.name==='review')reviewPage();else if(route.name==='search')searchPage();else if(route.name==='profile')profilePage();else if(route.name==='cloud')cloudPage();else if(route.name==='access')accessPage();else if(route.name==='admin')adminPage();else home();}
 
 app.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b)return;const a=b.dataset.action;
 if(a==='back'){
