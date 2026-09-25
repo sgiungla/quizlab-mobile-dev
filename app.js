@@ -1,9 +1,9 @@
 import {loadStore,saveStore,emptyStore} from './db.js';
-import {LocalOnlySyncAdapter} from './sync-adapter.js';
+import {QuizLabSyncAdapter} from './sync-adapter.js';
 
 const BANK_SCHEMA='unisgiunglalab.quizlab.bank';
 const BACKUP_SCHEMA='unisgiunglalab.quizlab.backup';
-const sync=new LocalOnlySyncAdapter();
+const sync=new QuizLabSyncAdapter();
 const app=document.getElementById('app');
 const picker=document.getElementById('filePicker');
 let store=emptyStore();
@@ -11,6 +11,7 @@ let route={name:'home',courseId:null};
 let session=null;
 let toastTimer=null;
 let examTimer=null;
+let cloudState={status:'local-only',user:null};
 
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const norm=s=>String(s??'').replace(/\s+/g,' ').trim();
@@ -95,7 +96,7 @@ function chapterBadge(x){
 }
 
 
-function top(title,sub,back){const dirty=(store.sync?.dirtyCourseIds||[]).length;return '<header class="topbar"><div class="topbar-row">'+(back?'<button class="icon-btn" data-action="back">←</button>':'')+'<div class="brand">'+esc(title)+'<small>'+esc(sub||'')+'</small></div><div class="spacer"></div><button class="profile-chip" data-action="profile">'+avatarHtml('tiny')+'<span>'+(store.profile?.displayName?esc(store.profile.displayName.split(' ')[0]):'Profilo')+'</span></button><div class="sync" title="Predisposto per la sincronizzazione cloud">● locale'+(dirty?' · '+dirty+' da sincronizzare':'')+'</div></div></header>';}
+function top(title,sub,back){const dirty=(store.sync?.dirtyCourseIds||[]).length,user=cloudState.user;const syncLabel=user?'● cloud':'● locale';return '<header class="topbar"><div class="topbar-row">'+(back?'<button class="icon-btn" data-action="back">←</button>':'')+'<div class="brand">'+esc(title)+'<small>'+esc(sub||'')+'</small></div><div class="spacer"></div><button class="profile-chip" data-action="profile">'+avatarHtml('tiny')+'<span>'+(store.profile?.displayName?esc(store.profile.displayName.split(' ')[0]):'Profilo')+'</span></button><button class="sync sync-btn" data-action="cloud" title="'+(user?'Account cloud collegato':'Configura account cloud')+'">'+syncLabel+(dirty?' · '+dirty:'')+'</button></div></header>';}
 function page(body,title='QuizLab Mobile DEV',sub='offline-first',back=false){app.innerHTML='<div>'+top(title,sub,back)+'<main class="main">'+body+'</main></div>';}
 function setRoute(name,courseId=route.courseId){if(examTimer){clearInterval(examTimer);examTimer=null;}route={name,courseId};session=null;render();}
 
@@ -202,6 +203,36 @@ async function handleAvatar(e){
  const reader=new FileReader();reader.onload=async()=>{store.profile.avatarDataUrl=String(reader.result||'');store.profile.updatedAt=now();store.sync.profileDirty=true;store.sync.lastLocalChangeAt=now();await saveStore(store);toast('Foto profilo aggiornata');profilePage();};reader.readAsDataURL(f);
 }
 
+async function startCloud(){
+ try{
+  cloudState=await sync.start({
+   settings:store.settings||{},
+   onAuthChange:async ({session,status})=>{
+    cloudState={status,user:session?.user||null};
+    store.sync.mode=status;
+    store.sync.ownerId=session?.user?.id||store.sync.ownerId;
+    await saveStore(store);
+    render();
+   }
+  });
+ }catch(e){
+  cloudState={status:'cloud-error',user:null};
+  console.warn('Cloud init',e);
+ }
+}
+function cloudPage(){
+ const cfg=store.settings||{},user=cloudState.user;
+ const configured=!!(cfg.supabaseUrl&&cfg.supabasePublishableKey);
+ let body='<div class="stack"><section class="card hero jungle-hero"><div class="eyebrow">Cloud Sgiungla</div><h1>'+(user?'Account collegato ☁️':'Collega il tuo account')+'</h1><p class="subtle">'+(user?'Sei autenticato come '+esc(user.email||'utente')+'.':'Il database è pronto. Ora colleghiamo questa PWA al tuo account Supabase.')+'</p></section>';
+ if(!configured){
+  body+='<section class="card"><h2 class="section-title">Configurazione cloud</h2><label>Project URL<input id="cloudUrl" placeholder="https://...supabase.co"></label><label>Publishable key<input id="cloudKey" placeholder="sb_publishable_..."></label><button class="btn" data-action="save-cloud-config">Salva collegamento</button><p class="subtle">Usa solo la Publishable key. Non inserire mai Secret / service-role key.</p></section>';
+ }else if(!user){
+  body+='<section class="card"><h2 class="section-title">Account</h2><label>Email<input id="authEmail" type="email" autocomplete="email"></label><label>Password<input id="authPassword" type="password" autocomplete="current-password" minlength="8"></label><div class="actions"><button class="btn" data-action="sign-in">Accedi</button><button class="btn secondary" data-action="sign-up">Crea account</button></div><button class="btn ghost" data-action="reset-cloud-config">Cambia configurazione cloud</button></section>';
+ }else{
+  body+='<section class="card"><h2 class="section-title">Sincronizzazione</h2><div class="sync-panel"><div><span>Account</span><strong>'+esc(user.email||user.id)+'</strong></div><div><span>Stato</span><strong>Cloud collegato</strong></div><div><span>Dati locali da sincronizzare</span><strong>'+((store.sync?.dirtyCourseIds||[]).length)+' materie</strong></div></div><div class="actions"><button class="btn secondary" data-action="push-profile">Sincronizza profilo</button><button class="btn ghost" data-action="sign-out">Esci</button></div><p class="subtle">In questa fase verifichiamo prima account e profilo. La sincronizzazione completa di banche/progressi arriva nel passaggio successivo.</p></section>';
+ }
+ body+='</div>';page(body,'Cloud','Account e sync',true);
+}
 function searchPage(){const c=course(),chs=uniq(qbank(c).map(q=>Number(q.chapter)).filter(Boolean)).sort((a,b)=>a-b);page('<div class="stack"><section class="card"><h2 class="section-title">Cerca nella banca</h2><label>Parola o frase<input id="searchInput" placeholder="es. media aritmetica"></label><div class="row"><label>Cerca in<select id="searchWhere"><option value="question">Domanda</option><option value="answers">Risposte</option><option value="explanation">Spiegazione</option><option value="topic">Argomento</option><option value="all">Tutto</option></select></label><label>Origine<select id="searchSource"><option value="all">Tutte</option><option value="official">Ufficiali</option><option value="ai">AI</option></select></label></div><div class="row"><label>Stato<select id="searchStatus"><option value="all">Tutte</option><option value="unseen">Mai viste</option><option value="correct">Corrette</option><option value="wrong">Sbagliate</option><option value="recovery">Da recuperare</option><option value="marked">Segnate</option><option value="historical">Errori storici</option><option value="warning">Con warning</option><option value="warning_unresolved">Warning irrisolti</option></select></label><label>Difficoltà<select id="searchDifficulty"><option value="all">Tutte</option><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select></label></div><label>Capitolo<select id="searchChapter"><option value="all">Tutti</option>'+chs.map(ch=>'<option value="'+ch+'">'+ch+'</option>').join('')+'</select></label></section><section class="card" id="searchResults"><div class="empty">Inserisci una ricerca o applica almeno un filtro.</div></section></div>',c.subject,'Esplora banca',true);setTimeout(()=>{for(const id of ['searchInput','searchWhere','searchSource','searchStatus','searchDifficulty','searchChapter']){const el=document.getElementById(id);if(el)el.addEventListener(id==='searchInput'?'input':'change',updateSearch);}},0);}
 function searchMatches(){const c=course(),term=norm(document.getElementById('searchInput')?.value).toLowerCase(),where=document.getElementById('searchWhere')?.value||'question',src=document.getElementById('searchSource')?.value||'all',status=document.getElementById('searchStatus')?.value||'all',diff=document.getElementById('searchDifficulty')?.value||'all',ch=document.getElementById('searchChapter')?.value||'all',latest=latestMap(c);const active=!!term||src!=='all'||status!=='all'||diff!=='all'||ch!=='all';if(!active)return[];return qbank(c).filter(q=>{if(src!=='all'&&q.source!==src)return false;if(diff!=='all'&&q.difficulty!==diff)return false;if(ch!=='all'&&Number(q.chapter)!==Number(ch))return false;const a=latest.get(q.id);if(status==='unseen'&&a)return false;if(status==='correct'&&!a?.correct)return false;if(status==='wrong'&&(!a||a.correct))return false;if(status==='recovery'&&!c.pendingReview.includes(q.id))return false;if(status==='marked'&&!c.marked.includes(q.id))return false;if(status==='historical'&&!c.historicalWrong.includes(q.id))return false;if(status==='warning'&&!q.validationWarning)return false;if(status==='warning_unresolved'&&(!q.validationWarning||!['unresolved','source_not_found',''].includes(norm(q.warningResolution?.status).toLowerCase())))return false;if(!term)return true;const fields={question:[q.text],answers:(q.options||[]).map(o=>o.text),explanation:[q.explanation],topic:[q.topic,q.topicId,q.chapterTitle],all:[q.text,q.explanation,q.reference,q.topic,q.topicId,q.chapterTitle,...(q.options||[]).map(o=>o.text)]};return (fields[where]||fields.all).filter(Boolean).join(' ').toLowerCase().includes(term);});}
 function updateSearch(){const r=searchMatches(),box=document.getElementById('searchResults');if(!box)return;const visible=r.slice(0,30);box.innerHTML='<div class="toolbar"><strong>'+r.length+' risultati · visualizzati '+visible.length+'</strong>'+(r.length?'<button class="btn secondary" data-action="study-search">Studia tutti</button><button class="btn secondary" data-action="train-search">Allenati sui risultati</button>':'')+'</div>'+visible.map(q=>'<div class="result"><div class="result-title">'+esc(q.text)+'</div><div class="result-meta">Cap. '+q.chapter+' · '+(q.source==='official'?'Ufficiale':'AI')+' · '+esc(q.difficulty||'medium')+(q.topic?' · '+esc(q.topic):'')+'</div><button class="btn ghost" data-action="open-question" data-qid="'+esc(q.id)+'">Apri</button></div>').join('');}
@@ -212,13 +243,33 @@ async function importPack(p){if(!p||typeof p!=='object')throw new Error('JSON no
 function exportCourse(id){const c=course(id);if(!c)return;download(fileName(c.subject)+'_QuizLab_banca_COMPLETA_mobile.json',{schema:BANK_SCHEMA,version:2,exportedAt:now(),course:{courseId:id,subject:c.subject},officialBank:c.officialBank,aiBank:c.aiBank,topicMap:c.topicMap,aiWorkflow:c.aiWorkflow});}
 function backup(){download('QuizLab_Mobile_BACKUP_'+new Date().toISOString().slice(0,10)+'.json',{schema:BACKUP_SCHEMA,version:1,exportedAt:now(),store});}
 
-function render(){if(route.name==='home')home();else if(route.name==='dashboard')dashboard();else if(route.name==='training')training(route.presetChapter);else if(route.name==='session')sessionView();else if(route.name==='results')results();else if(route.name==='review')reviewPage();else if(route.name==='search')searchPage();else if(route.name==='profile')profilePage();else home();}
+function render(){if(route.name==='home')home();else if(route.name==='dashboard')dashboard();else if(route.name==='training')training(route.presetChapter);else if(route.name==='session')sessionView();else if(route.name==='results')results();else if(route.name==='review')reviewPage();else if(route.name==='search')searchPage();else if(route.name==='profile')profilePage();else if(route.name==='cloud')cloudPage();else home();}
 
 app.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b)return;const a=b.dataset.action;
 if(a==='back'){if(route.name==='dashboard')setRoute('home',null);else if(route.name==='session'){if(confirm('Uscire dalla sessione?'))setRoute('dashboard');}else setRoute('dashboard');return;}
 if(a==='profile'){setRoute('profile',route.courseId);return;}
+if(a==='cloud'){setRoute('cloud',route.courseId);return;}
+if(a==='save-cloud-config'){
+ const url=norm(document.getElementById('cloudUrl')?.value),key=norm(document.getElementById('cloudKey')?.value);
+ if(!/^https:\/\/.+\.supabase\.co$/.test(url)||!key.startsWith('sb_publishable_')){toast('Controlla URL e Publishable key');return;}
+ store.settings.supabaseUrl=url;store.settings.supabasePublishableKey=key;await saveStore(store);await startCloud();toast('Cloud configurato ☁️');cloudPage();return;
+}
+if(a==='reset-cloud-config'){delete store.settings.supabaseUrl;delete store.settings.supabasePublishableKey;await saveStore(store);cloudState={status:'local-only',user:null};cloudPage();return;}
+if(a==='sign-up'){
+ const email=norm(document.getElementById('authEmail')?.value),password=String(document.getElementById('authPassword')?.value||'');
+ if(!email||password.length<8){toast('Email valida e password di almeno 8 caratteri');return;}
+ const {data,error}=await sync.signUp(email,password,location.origin+location.pathname);if(error){alert(error.message);return;}
+ toast(data?.session?'Account creato e collegato':'Controlla la mail per confermare l’account');return;
+}
+if(a==='sign-in'){
+ const email=norm(document.getElementById('authEmail')?.value),password=String(document.getElementById('authPassword')?.value||'');
+ const {error}=await sync.signIn(email,password);if(error){alert(error.message);return;}toast('Accesso effettuato ☁️');return;
+}
+if(a==='sign-out'){await sync.signOut();toast('Disconnesso dal cloud');return;}
+if(a==='push-profile'){try{await sync.upsertProfile(store.profile);store.sync.profileDirty=false;store.sync.lastPushAt=now();await saveStore(store);toast('Profilo sincronizzato ☁️');cloudPage();}catch(e){alert(e.message||e);}return;}
+
 if(a==='avatar-pick'){document.getElementById('avatarPicker')?.click();return;}
-if(a==='save-profile'){store.profile.displayName=norm(document.getElementById('profileName')?.value).slice(0,60);store.profile.motto=norm(document.getElementById('profileMotto')?.value).slice(0,120)||'La giungla universitaria è sotto controllo.';store.profile.updatedAt=now();store.sync.profileDirty=true;store.sync.lastLocalChangeAt=now();await saveStore(store);toast('Profilo salvato 🌴');profilePage();return;}
+if(a==='save-profile'){store.profile.displayName=norm(document.getElementById('profileName')?.value).slice(0,60);store.profile.motto=norm(document.getElementById('profileMotto')?.value).slice(0,120)||'La giungla universitaria è sotto controllo.';store.profile.updatedAt=now();store.sync.profileDirty=true;store.sync.lastLocalChangeAt=now();await saveStore(store);if(cloudState.user){try{await sync.upsertProfile(store.profile);store.sync.profileDirty=false;store.sync.lastPushAt=now();await saveStore(store);}catch(e){console.warn(e);}}toast('Profilo salvato 🌴');profilePage();return;}
 if(a==='import'){picker.value='';picker.click();return;}if(a==='backup'){backup();return;}if(a==='open'){setRoute('dashboard',b.dataset.id);return;}if(a==='export'){exportCourse(b.dataset.id||route.courseId);return;}
 if(a==='training'){setRoute('training');return;}if(a==='review-page'){setRoute('review');return;}if(a==='search'){setRoute('search');return;}if(a==='review'){review(b.dataset.kind);return;}
 if(a==='train-chapter'){route.presetChapter=Number(b.dataset.chapter);route.name='training';session=null;render();return;}
@@ -246,5 +297,5 @@ if(a==='study-search'){startSession(searchMatches(),'Studio risultati','study');
 
 picker.addEventListener('change',async()=>{const f=picker.files?.[0];if(!f)return;try{const msg=await importPack(JSON.parse(await f.text()));toast('Importazione OK · '+msg);render();}catch(e){alert('Importazione non riuscita:\n'+(e?.message||e));}});
 
-async function init(){store=await loadStore();if(!store.courses||typeof store.courses!=='object')store=emptyStore();for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await sync.start();render();if('serviceWorker'in navigator)try{await navigator.serviceWorker.register('./service-worker.js');}catch(e){console.warn(e);}}
+async function init(){store=await loadStore();if(!store.courses||typeof store.courses!=='object')store=emptyStore();for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await startCloud();render();if('serviceWorker'in navigator)try{await navigator.serviceWorker.register('./service-worker.js');}catch(e){console.warn(e);}}
 init().catch(e=>{app.innerHTML='<main class="main"><section class="card"><h2>Errore avvio</h2><p>'+esc(e?.message||e)+'</p></section></main>';});
