@@ -37,3 +37,30 @@
  .avatar.large{width:68px;height:68px}
  .mini-chart{height:125px}
 }
+
+
+.bank-total{display:flex;align-items:end;justify-content:space-between;gap:10px;margin:10px 0 8px;padding:10px 12px;border:1px solid #1f2a3b;border-radius:14px;background:rgba(2,6,23,.55)}
+.bank-total span{color:var(--muted);font-size:11px;font-weight:700}
+.bank-total strong{font-size:28px;line-height:1}
+.hero-total{margin-top:12px}
+.training-overview{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.collapse-card{padding:0;overflow:hidden}
+.collapse-card>summary{list-style:none;cursor:pointer;padding:16px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.collapse-card>summary::-webkit-details-marker{display:none}
+.collapse-card[open]>summary{border-bottom:1px solid #1f2a3b}
+.collapse-body{padding:0 16px 8px}
+.expand-hint{color:#7dd3fc;font-size:12px;font-weight:800;white-space:nowrap}
+.collapse-card[open] .expand-hint{font-size:0}
+.collapse-card[open] .expand-hint:after{content:"Chiudi ▴";font-size:12px}
+.warn-pill{background:#78350f;color:#fde68a}
+.ok-pill{background:#14532d;color:#bbf7d0}
+.chapter-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.chapter-row>div{min-width:0}
+.compact-btn{padding:8px 10px;white-space:nowrap}
+@media(max-width:520px){
+ .bank-total strong{font-size:24px}
+ .training-overview{align-items:flex-start;flex-direction:column}
+ .collapse-card>summary{align-items:flex-start}
+ .chapter-row{align-items:flex-start}
+ .chapter-row .compact-btn{padding:7px 9px}
+}
