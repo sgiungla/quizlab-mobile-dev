@@ -64,12 +64,36 @@ export class QuizLabSyncAdapter {
     const row={
       user_id:user.id,
       display_name:profile.displayName||'',
-      avatar_url:null,
+      avatar_url:profile.avatarPath||null,
       motto:profile.motto||'La giungla universitaria è sotto controllo.',
       updated_at:new Date().toISOString()
     };
     const {error}=await this.client.from('quizlab_profiles').upsert(row,{onConflict:'user_id'});
     if(error) throw error;
+  }
+
+  async uploadAvatar(file){
+    const user=this.requireUser();
+    if(!file) throw new Error('Nessun file selezionato');
+    const type=String(file.type||'').toLowerCase();
+    if(!['image/jpeg','image/png','image/webp','image/gif'].includes(type)) throw new Error('Formato immagine non supportato');
+    if(file.size>2.5*1024*1024) throw new Error('Foto troppo grande: massimo 2,5 MB');
+    const ext=type==='image/png'?'png':type==='image/webp'?'webp':type==='image/gif'?'gif':'jpg';
+    const path=user.id+'/avatar.'+ext;
+    const {error}=await this.client.storage.from('quizlab-avatars').upload(path,file,{
+      cacheControl:'3600',
+      upsert:true,
+      contentType:type
+    });
+    if(error) throw error;
+    return path;
+  }
+
+  async signedAvatarUrl(path){
+    if(!path)return '';
+    const {data,error}=await this.client.storage.from('quizlab-avatars').createSignedUrl(path,60*60*24*7);
+    if(error) throw error;
+    return data?.signedUrl||'';
   }
 
   async pullProfile(){
@@ -80,7 +104,12 @@ export class QuizLabSyncAdapter {
       .eq('user_id',user.id)
       .maybeSingle();
     if(error) throw error;
-    return data||null;
+    if(!data)return null;
+    let avatar_signed_url='';
+    if(data.avatar_url){
+      try{avatar_signed_url=await this.signedAvatarUrl(data.avatar_url);}catch(e){console.warn('Avatar signed URL',e);}
+    }
+    return {...data,avatar_signed_url};
   }
 
   async accessState(){
