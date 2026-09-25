@@ -229,12 +229,26 @@ begin
     ),0)::bigint,
     coalesce((
       select count(*)
-      from jsonb_array_elements(case when jsonb_typeof(uc.progress_json->'attempts')='array' then uc.progress_json->'attempts' else '[]'::jsonb end) a
-      where lower(coalesce(a->>'correct','false'))='true'
+      from (
+        select distinct on (a->>'questionId') a
+        from jsonb_array_elements(case when jsonb_typeof(uc.progress_json->'attempts')='array' then uc.progress_json->'attempts' else '[]'::jsonb end) a
+        where coalesce(a->>'questionId','') <> ''
+        order by a->>'questionId', coalesce(a->>'at','') desc
+      ) latest
+      where lower(coalesce(latest.a->>'correct','false'))='true'
     ),0)::bigint,
     coalesce((
-      select round(100.0 * count(*) filter (where lower(coalesce(a->>'correct','false'))='true') / nullif(count(*),0),1)
-      from jsonb_array_elements(case when jsonb_typeof(uc.progress_json->'attempts')='array' then uc.progress_json->'attempts' else '[]'::jsonb end) a
+      select round(
+        100.0 * count(*) filter (where lower(coalesce(latest.a->>'correct','false'))='true')
+        / nullif(count(*),0),
+        1
+      )
+      from (
+        select distinct on (a->>'questionId') a
+        from jsonb_array_elements(case when jsonb_typeof(uc.progress_json->'attempts')='array' then uc.progress_json->'attempts' else '[]'::jsonb end) a
+        where coalesce(a->>'questionId','') <> ''
+        order by a->>'questionId', coalesce(a->>'at','') desc
+      ) latest
     ),0)::numeric,
     case when jsonb_typeof(uc.progress_json->'exams')='array' then jsonb_array_length(uc.progress_json->'exams') else 0 end::bigint,
     (
