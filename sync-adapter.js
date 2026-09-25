@@ -83,6 +83,18 @@ export class QuizLabSyncAdapter {
     return data||null;
   }
 
+  async accessState(){
+    this.requireUser();
+    const {data:status,error:statusError}=await this.client.rpc('quizlab_account_status');
+    if(statusError){
+      if(statusError.code==='42883') return {status:'active',isAdmin:false,legacy:true};
+      throw statusError;
+    }
+    const {data:isAdmin,error:adminError}=await this.client.rpc('quizlab_is_admin');
+    if(adminError) throw adminError;
+    return {status:status||'pending',isAdmin:Boolean(isAdmin)};
+  }
+
   bankPayload(course={}){
     return {
       officialBank:Array.isArray(course.officialBank)?course.officialBank:[],
