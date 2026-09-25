@@ -338,3 +338,59 @@ grant execute on function public.quizlab_register_pending_user() to authenticate
 
 -- DOPO aver copiato l'UUID del tuo account, esegui UNA VOLTA:
 -- insert into public.quizlab_admins(user_id) values ('INCOLLA-QUI-IL-TUO-UUID') on conflict do nothing;
+
+
+-- Avatar cloud privati: ogni utente legge/scrive solo nella propria cartella UUID.
+insert into storage.buckets (id,name,public,file_size_limit,allowed_mime_types)
+values (
+  'quizlab-avatars',
+  'quizlab-avatars',
+  false,
+  2621440,
+  array['image/jpeg','image/png','image/webp','image/gif']
+)
+on conflict (id) do update set
+  public=false,
+  file_size_limit=2621440,
+  allowed_mime_types=excluded.allowed_mime_types;
+
+drop policy if exists "quizlab_avatar_select_own" on storage.objects;
+create policy "quizlab_avatar_select_own" on storage.objects
+for select to authenticated
+using (
+  bucket_id='quizlab-avatars'
+  and (storage.foldername(name))[1]=auth.uid()::text
+  and public.quizlab_access_allowed()
+);
+
+drop policy if exists "quizlab_avatar_insert_own" on storage.objects;
+create policy "quizlab_avatar_insert_own" on storage.objects
+for insert to authenticated
+with check (
+  bucket_id='quizlab-avatars'
+  and (storage.foldername(name))[1]=auth.uid()::text
+  and public.quizlab_access_allowed()
+);
+
+drop policy if exists "quizlab_avatar_update_own" on storage.objects;
+create policy "quizlab_avatar_update_own" on storage.objects
+for update to authenticated
+using (
+  bucket_id='quizlab-avatars'
+  and (storage.foldername(name))[1]=auth.uid()::text
+  and public.quizlab_access_allowed()
+)
+with check (
+  bucket_id='quizlab-avatars'
+  and (storage.foldername(name))[1]=auth.uid()::text
+  and public.quizlab_access_allowed()
+);
+
+drop policy if exists "quizlab_avatar_delete_own" on storage.objects;
+create policy "quizlab_avatar_delete_own" on storage.objects
+for delete to authenticated
+using (
+  bucket_id='quizlab-avatars'
+  and (storage.foldername(name))[1]=auth.uid()::text
+  and public.quizlab_access_allowed()
+);
