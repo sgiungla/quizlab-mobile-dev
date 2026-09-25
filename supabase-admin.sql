@@ -177,24 +177,16 @@ begin
     u.email::text,
     u.created_at,
     u.last_sign_in_at,
-    max(d.last_seen),
-    case when bool_or(a.user_id is not null) then 'active' else coalesce(max(ua.status),'pending') end::text,
-    count(distinct uc.bank_id)::bigint,
-    coalesce(sum(
-      case when jsonb_typeof(uc.progress_json->'attempts') = 'array'
-      then jsonb_array_length(uc.progress_json->'attempts') else 0 end
-    ),0)::bigint,
-    coalesce(sum(
-      case when jsonb_typeof(uc.progress_json->'exams') = 'array'
-      then jsonb_array_length(uc.progress_json->'exams') else 0 end
-    ),0)::bigint
+    (select max(d.last_seen) from public.quizlab_devices d where d.user_id=u.id),
+    case
+      when exists(select 1 from public.quizlab_admins a where a.user_id=u.id) then 'active'
+      else coalesce((select ua.status from public.quizlab_user_access ua where ua.user_id=u.id),'pending')
+    end::text,
+    (select count(*) from public.quizlab_user_courses uc where uc.user_id=u.id)::bigint,
+    coalesce((select sum(case when jsonb_typeof(uc.progress_json->'attempts')='array' then jsonb_array_length(uc.progress_json->'attempts') else 0 end) from public.quizlab_user_courses uc where uc.user_id=u.id),0)::bigint,
+    coalesce((select sum(case when jsonb_typeof(uc.progress_json->'exams')='array' then jsonb_array_length(uc.progress_json->'exams') else 0 end) from public.quizlab_user_courses uc where uc.user_id=u.id),0)::bigint
   from auth.users u
-  left join public.quizlab_devices d on d.user_id = u.id
-  left join public.quizlab_user_access ua on ua.user_id = u.id
-  left join public.quizlab_admins a on a.user_id = u.id
-  left join public.quizlab_user_courses uc on uc.user_id = u.id
-  group by u.id,u.email,u.created_at,u.last_sign_in_at
-  order by max(d.last_seen) desc nulls last, u.created_at desc;
+  order by (select max(d.last_seen) from public.quizlab_devices d where d.user_id=u.id) desc nulls last, u.created_at desc;
 end;
 $$;
 
@@ -239,7 +231,7 @@ returns text
 language plpgsql
 security definer
 set search_path = public, auth
-as $
+as $$
 begin
   if auth.uid() is null then
     raise exception 'not authenticated' using errcode = '42501';
@@ -255,7 +247,7 @@ begin
 
   return public.quizlab_account_status();
 end;
-$;
+$$;
 
 revoke all on function public.quizlab_register_pending_user() from public;
 grant execute on function public.quizlab_register_pending_user() to authenticated;
