@@ -15,6 +15,7 @@ let examTimer=null;
 let cloudState={status:'local-only',user:null};
 let accessState={status:'active',isAdmin:false,legacy:true};
 let adminData={users:[],storage:null,courses:[],loaded:false};
+let adminPendingCount=0;
 let autoSyncTimer=null;
 let syncInFlight=false;
 let lastSyncError=false;
@@ -149,7 +150,10 @@ function chapterBadge(x){
 }
 
 
-function top(title,sub,back){return '<header class="topbar"><div class="topbar-row">'+(back?'<button class="icon-btn" data-action="back">←</button>':'')+'<div class="brand">'+esc(title)+'<small>'+esc(sub||'')+'</small></div><div class="spacer"></div><button class="profile-chip" data-action="profile">'+avatarHtml('tiny')+'<span>'+(store.profile?.displayName?esc(store.profile.displayName.split(' ')[0]):'Profilo')+'</span></button>'+syncBadgeHtml()+'</div></header>';}
+function top(title,sub,back){
+ const adminAlert=accessState.isAdmin&&adminPendingCount>0?'<button class="admin-alert" data-action="open-admin" title="Richieste di accesso in attesa">🛡️ '+adminPendingCount+'</button>':'';
+ return '<header class="topbar"><div class="topbar-row">'+(back?'<button class="icon-btn" data-action="back">←</button>':'')+'<div class="brand">'+esc(title)+'<small>'+esc(sub||'')+'</small></div><div class="spacer"></div>'+adminAlert+'<button class="profile-chip" data-action="profile">'+avatarHtml('tiny')+'<span>'+(store.profile?.displayName?esc(store.profile.displayName.split(' ')[0]):'Profilo')+'</span></button>'+syncBadgeHtml()+'</div></header>';
+}
 function page(body,title='QuizLab Mobile DEV',sub='offline-first',back=false){app.innerHTML='<div>'+top(title,sub,back)+'<main class="main">'+body+'</main></div>';}
 function setRoute(name,courseId=route.courseId){if(examTimer){clearInterval(examTimer);examTimer=null;}route={name,courseId};session=null;render();}
 
@@ -448,6 +452,7 @@ async function startCloud(){
       try{await sync.ensurePendingRegistration();}catch(e){console.warn('Pending registration',e);}
       try{accessState=await sync.accessState();}catch(e){accessState={status:'active',isAdmin:false,legacy:true};console.warn('Access state',e);}
       if(accessState.status==='active'){
+        if(accessState.isAdmin)await refreshAdminPending();
         await hydrateCloudProfile();
         await cloudSync({silent:true});
         route.name='home';
@@ -467,6 +472,7 @@ async function startCloud(){
     try{await sync.ensurePendingRegistration();}catch(e){console.warn('Pending registration',e);}
     try{accessState=await sync.accessState();}catch(e){accessState={status:'active',isAdmin:false,legacy:true};console.warn('Access state',e);}
     if(accessState.status==='active'){
+      if(accessState.isAdmin)await refreshAdminPending();
       await hydrateCloudProfile();
       await cloudSync({silent:true});
     }else{
@@ -488,6 +494,15 @@ async function refreshAdminData(){
  if(!accessState.isAdmin)return;
  const [users,storage,courses]=await Promise.all([sync.adminUserOverview(),sync.adminStorageOverview(),sync.adminUserCourseStats()]);
  adminData={users,storage,courses,loaded:true};
+ adminPendingCount=users.filter(u=>u.account_status==='pending').length;
+}
+async function refreshAdminPending(){
+ if(!accessState.isAdmin){adminPendingCount=0;return 0;}
+ try{
+  const users=await sync.adminUserOverview();
+  adminPendingCount=(users||[]).filter(u=>u.account_status==='pending').length;
+ }catch(e){console.warn('Admin pending count',e);}
+ return adminPendingCount;
 }
 function adminPage(){
  if(!accessState.isAdmin)return setRoute('home',null);
@@ -530,7 +545,7 @@ function cloudPage(){
  }else if(!user){
   body+='<section class="card"><h2 class="section-title">Account</h2><label>Email<input id="authEmail" type="email" autocomplete="email"></label><label>Password<input id="authPassword" type="password" autocomplete="current-password" minlength="8"></label><div class="actions"><button class="btn" data-action="sign-in">Accedi</button><button class="btn secondary" data-action="sign-up">Crea account</button></div><button class="btn ghost" data-action="reset-cloud-config">Cambia configurazione cloud</button></section>';
  }else{
-  body+='<section class="card"><h2 class="section-title">Sincronizzazione</h2><div class="sync-panel"><div><span>Account</span><strong>'+esc(user.email||user.id)+'</strong></div><div><span>Stato</span><strong>'+esc(syncBadgeModel().label)+'</strong></div><div><span>Ultima sincronizzazione</span><strong>'+esc(fmtSyncAgo(store.sync?.lastPullAt||store.sync?.lastPushAt)||'non ancora completata')+'</strong></div><div><span>Dati locali da sincronizzare</span><strong>'+((store.sync?.dirtyCourseIds||[]).length)+' materie</strong></div></div><div class="actions"><button class="btn" data-action="sync-all">Sincronizza tutto</button><button class="btn secondary" data-action="push-profile">Sincronizza profilo</button>'+(accessState.isAdmin?'<button class="btn secondary" data-action="open-admin">🛡️ Admin</button>':'')+'<button class="btn ghost" data-action="sign-out">Esci</button></div><p class="subtle">La sincronizzazione è automatica. Il pulsante serve solo per forzarla subito manualmente.</p></section>';
+  body+='<section class="card"><h2 class="section-title">Sincronizzazione</h2><div class="sync-panel"><div><span>Account</span><strong>'+esc(user.email||user.id)+'</strong></div><div><span>Stato</span><strong>'+esc(syncBadgeModel().label)+'</strong></div><div><span>Ultima sincronizzazione</span><strong>'+esc(fmtSyncAgo(store.sync?.lastPullAt||store.sync?.lastPushAt)||'non ancora completata')+'</strong></div><div><span>Dati locali da sincronizzare</span><strong>'+((store.sync?.dirtyCourseIds||[]).length)+' materie</strong></div></div><div class="actions"><button class="btn" data-action="sync-all">Sincronizza tutto</button><button class="btn secondary" data-action="push-profile">Sincronizza profilo</button>'+(accessState.isAdmin?'<button class="btn secondary" data-action="open-admin">🛡️ Admin'+(adminPendingCount?' · '+adminPendingCount:'')+'</button>':'')+'<button class="btn ghost" data-action="sign-out">Esci</button></div><p class="subtle">La sincronizzazione è automatica. Il pulsante serve solo per forzarla subito manualmente.</p></section>';
  }
  body+='</div>';page(body,'Cloud','Account e sync',true);
 }
@@ -694,5 +709,5 @@ if(a==='study-search'){startSession(searchMatches(),'Studio risultati','study');
 
 picker.addEventListener('change',async()=>{const f=picker.files?.[0];if(!f)return;try{const msg=await importPack(JSON.parse(await f.text()));toast('Importazione OK · '+msg);render();}catch(e){alert('Importazione non riuscita:\n'+(e?.message||e));}});
 
-async function init(){store=await loadStore();if(!store.courses||typeof store.courses!=='object')store=emptyStore();for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await applyDefaultCloudConfig();await startCloud();if(!cloudState.user&&sync.configured(store.settings||{}))route.name='cloud';window.addEventListener('online',async()=>{await refreshAccessGate({renderBlocked:false});if(accessState.status==='active')cloudSync({silent:true});else render();});window.addEventListener('focus',()=>refreshAccessGate());document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshAccessGate();});render();if('serviceWorker'in navigator)try{await navigator.serviceWorker.register('./service-worker.js');}catch(e){console.warn(e);}}
+async function init(){store=await loadStore();if(!store.courses||typeof store.courses!=='object')store=emptyStore();for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await applyDefaultCloudConfig();await startCloud();if(!cloudState.user&&sync.configured(store.settings||{}))route.name='cloud';window.addEventListener('online',async()=>{await refreshAccessGate({renderBlocked:false});if(accessState.status==='active')cloudSync({silent:true});else render();});window.addEventListener('focus',async()=>{await refreshAccessGate({renderBlocked:false});if(accessState.isAdmin)await refreshAdminPending();render();});document.addEventListener('visibilitychange',async()=>{if(document.visibilityState==='visible'){await refreshAccessGate({renderBlocked:false});if(accessState.isAdmin)await refreshAdminPending();render();}});render();if('serviceWorker'in navigator)try{await navigator.serviceWorker.register('./service-worker.js');}catch(e){console.warn(e);}}
 init().catch(e=>{app.innerHTML='<main class="main"><section class="card"><h2>Errore avvio</h2><p>'+esc(e?.message||e)+'</p></section></main>';});
