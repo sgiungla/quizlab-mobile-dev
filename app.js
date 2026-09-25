@@ -176,6 +176,7 @@ async function fullCampaignPool(c,count,source){const all=filterSource(qbank(c),
 async function resetCycle(){const c=course();c.fullCampaign={signature:'all',seenIds:[],resetAt:now()};await saveCourse(route.courseId,c);toast('Ciclo materia ricominciato 🌱');training();}
 function startSession(questions,title,mode='training'){
  if(!questions.length){toast('Nessuna domanda disponibile');return;}
+ clearTimeout(autoSyncTimer);
  session={questions:[...questions],index:0,answers:{},title,mode,startedAt:Date.now(),questionShownAt:Date.now(),feedback:null,durationMs:mode==='exam'?30*60*1000:0,finished:false};
  route.name='session';
  if(mode==='exam'){if(examTimer)clearInterval(examTimer);examTimer=setInterval(()=>{if(!session||session.mode!=='exam'){clearInterval(examTimer);examTimer=null;return;}const left=session.durationMs-(Date.now()-session.startedAt);const el=document.getElementById('examTimer');if(el)el.textContent=fmtDuration(left);if(left<=0)finishExam(true);},1000);}
@@ -267,6 +268,10 @@ function mergeRemoteCourses(rows=[]){
 }
 async function cloudSync({silent=true}={}){
  if(syncInFlight||!cloudState.user||!navigator.onLine)return false;
+ const changeToken=store.sync?.lastLocalChangeAt||null;
+ const dirtyAtStart=[...(store.sync?.dirtyCourseIds||[])];
+ const bankDirtyAtStart=[...(store.sync?.dirtyBankCourseIds||[])];
+ let changedDuringSync=false;
  syncInFlight=true;lastSyncError=false;refreshSyncBadge();
  try{
   const result=await sync.syncNow({
@@ -275,9 +280,12 @@ async function cloudSync({silent=true}={}){
    courses:store.courses,
    clientId:store.sync?.clientId
   });
-  mergeRemoteCourses(result.pull?.courses||[]);
-  store.sync.dirtyCourseIds=[];
-  store.sync.dirtyBankCourseIds=[];
+  changedDuringSync=(store.sync?.lastLocalChangeAt||null)!==changeToken;
+  if(!changedDuringSync){
+   mergeRemoteCourses(result.pull?.courses||[]);
+   store.sync.dirtyCourseIds=(store.sync?.dirtyCourseIds||[]).filter(id=>!dirtyAtStart.includes(id));
+   store.sync.dirtyBankCourseIds=(store.sync?.dirtyBankCourseIds||[]).filter(id=>!bankDirtyAtStart.includes(id));
+  }
   store.sync.lastPushAt=now();
   store.sync.lastPullAt=now();
   store.sync.mode='cloud-online';
@@ -291,7 +299,11 @@ async function cloudSync({silent=true}={}){
   console.warn('Cloud sync',e);
   if(!silent)alert('Sincronizzazione non riuscita:\n'+(e?.message||e));
   return false;
- }finally{syncInFlight=false;refreshSyncBadge();}
+ }finally{
+  syncInFlight=false;
+  refreshSyncBadge();
+  if(changedDuringSync&&cloudState.user&&navigator.onLine)setTimeout(()=>cloudSync({silent:true}),120);
+ }
 }
 function scheduleAutoSync(){
  if(!cloudState.user||!navigator.onLine)return;
