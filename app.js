@@ -295,7 +295,29 @@ function profilePage(){
 }
 async function handleAvatar(e){
  const f=e.target.files?.[0];if(!f)return;if(f.size>2.5*1024*1024){toast('Foto troppo grande: massimo 2,5 MB');return;}
- const reader=new FileReader();reader.onload=async()=>{store.profile.avatarDataUrl=String(reader.result||'');store.profile.updatedAt=now();store.sync.profileDirty=true;store.sync.lastLocalChangeAt=now();await saveStore(store);toast('Foto profilo aggiornata');profilePage();};reader.readAsDataURL(f);
+ const reader=new FileReader();
+ reader.onload=async()=>{
+  store.profile.avatarDataUrl=String(reader.result||'');
+  store.profile.updatedAt=now();
+  store.sync.profileDirty=true;
+  store.sync.lastLocalChangeAt=now();
+  await saveStore(store);
+  if(cloudState.user&&accessState.status==='active'){
+   try{
+    const path=await sync.uploadAvatar(f);
+    store.profile.avatarPath=path;
+    await sync.upsertProfile(store.profile);
+    store.sync.profileDirty=false;
+    store.sync.lastPushAt=now();
+    await saveStore(store);
+    toast('Foto profilo sincronizzata ☁️');
+   }catch(err){console.warn('Avatar upload',err);toast('Foto salvata in locale · sync avatar non riuscita');}
+  }else{
+   toast('Foto profilo aggiornata');
+  }
+  profilePage();
+ };
+ reader.readAsDataURL(f);
 }
 
 async function applyDefaultCloudConfig(){
@@ -313,6 +335,8 @@ async function hydrateCloudProfile(){
   if(!p)return;
   store.profile.displayName=p.display_name||store.profile.displayName||'';
   store.profile.motto=p.motto||store.profile.motto||'La giungla universitaria è sotto controllo.';
+  store.profile.avatarPath=p.avatar_url||store.profile.avatarPath||'';
+  if(p.avatar_signed_url)store.profile.avatarDataUrl=p.avatar_signed_url;
   store.profile.updatedAt=p.updated_at||store.profile.updatedAt;
   store.sync.profileDirty=false;
   await saveStore(store);
