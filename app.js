@@ -79,10 +79,11 @@ function examBars(m){
  const xs=m.exams.slice(-8);
  return '<div class="mini-chart">'+xs.map((e,i)=>'<div class="bar-wrap" title="'+esc(String(e.grade))+'/30"><span class="bar-grade">'+(e.lode?'30L':esc(String(e.grade)))+'</span><div class="bar" style="height:'+Math.max(8,(Number(e.grade||0)/30)*100)+'%"></div><small>#'+(m.exams.length-xs.length+i+1)+'</small></div>').join('')+'</div>';
 }
-function coverageRing(m){
- const p=Math.round(m.coverage*100);
- return '<div class="coverage-ring" style="--p:'+p+'"><div><strong>'+p+'%</strong><span>copertura</span></div></div>';
+function statRing(value,label,sub=''){
+ const p=Math.max(0,Math.min(100,Math.round(Number(value)||0)));
+ return '<div class="coverage-ring" style="--p:'+p+'"><div><strong>'+p+'%</strong><span>'+esc(label)+'</span>'+(sub?'<small>'+esc(sub)+'</small>':'')+'</div></div>';
 }
+function coverageRing(m){return statRing(m.coverage*100,'copertura',m.attempted+'/'+m.total);}
 function recentAccuracy(c,n=20){const rows=(c.attempts||[]).slice(-n);if(!rows.length)return null;return rows.filter(a=>a.correct).length/rows.length;}
 function chapterBadge(x){
  if(x.seenN===0)return '🌱 Da esplorare';
