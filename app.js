@@ -363,5 +363,5 @@ if(a==='study-search'){startSession(searchMatches(),'Studio risultati','study');
 
 picker.addEventListener('change',async()=>{const f=picker.files?.[0];if(!f)return;try{const msg=await importPack(JSON.parse(await f.text()));toast('Importazione OK · '+msg);render();}catch(e){alert('Importazione non riuscita:\n'+(e?.message||e));}});
 
-async function init(){store=await loadStore();if(!store.courses||typeof store.courses!=='object')store=emptyStore();for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await startCloud();render();if('serviceWorker'in navigator)try{await navigator.serviceWorker.register('./service-worker.js');}catch(e){console.warn(e);}}
+async function init(){store=await loadStore();if(!store.courses||typeof store.courses!=='object')store=emptyStore();for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await startCloud();window.addEventListener('online',()=>cloudSync({silent:true}));render();if('serviceWorker'in navigator)try{await navigator.serviceWorker.register('./service-worker.js');}catch(e){console.warn(e);}}
 init().catch(e=>{app.innerHTML='<main class="main"><section class="card"><h2>Errore avvio</h2><p>'+esc(e?.message||e)+'</p></section></main>';});
