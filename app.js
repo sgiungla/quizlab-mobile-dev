@@ -14,7 +14,7 @@ let toastTimer=null;
 let examTimer=null;
 let cloudState={status:'local-only',user:null};
 let accessState={status:'active',isAdmin:false,legacy:true};
-let adminData={users:[],storage:null,loaded:false};
+let adminData={users:[],storage:null,courses:[],loaded:false};
 let autoSyncTimer=null;
 let syncInFlight=false;
 let lastSyncError=false;
@@ -431,19 +431,29 @@ function accessPage(){
 }
 async function refreshAdminData(){
  if(!accessState.isAdmin)return;
- const [users,storage]=await Promise.all([sync.adminUserOverview(),sync.adminStorageOverview()]);
- adminData={users,storage,loaded:true};
+ const [users,storage,courses]=await Promise.all([sync.adminUserOverview(),sync.adminStorageOverview(),sync.adminUserCourseStats()]);
+ adminData={users,storage,courses,loaded:true};
 }
 function adminPage(){
  if(!accessState.isAdmin)return setRoute('home',null);
- const users=adminData.users||[],storage=adminData.storage||{};
+ const users=adminData.users||[],storage=adminData.storage||{},courses=adminData.courses||[];
  const pending=users.filter(u=>u.account_status==='pending').length;
  const active=users.filter(u=>u.account_status==='active').length;
  const suspended=users.filter(u=>u.account_status==='suspended').length;
+ const byUser=new Map();
+ for(const c of courses){
+  if(!byUser.has(c.user_id))byUser.set(c.user_id,[]);
+  byUser.get(c.user_id).push(c);
+ }
  const rows=users.map(u=>{
    const st=u.account_status||'pending';
    const self=cloudState.user?.id===u.user_id;
    const statusLabel=st==='active'?'Attivo':st==='suspended'?'Sospeso':'In attesa';
+   const userCourses=byUser.get(u.user_id)||[];
+   const totalAttempts=userCourses.reduce((n,c)=>n+Number(c.attempt_count||0),0);
+   const totalCorrect=userCourses.reduce((n,c)=>n+Number(c.correct_count||0),0);
+   const accuracy=totalAttempts?Math.round(totalCorrect/totalAttempts*1000)/10:null;
+   const courseDetails=userCourses.map(c=>'<div class="admin-course"><div><strong>'+esc(c.subject||c.course_id)+'</strong><div class="result-meta">'+Number(c.attempt_count||0)+' tentativi · '+Number(c.unique_question_count||0)+' domande uniche · rendimento '+(c.accuracy_pct==null?'—':String(c.accuracy_pct).replace('.',',')+'%')+'</div><div class="result-meta">'+Number(c.exam_count||0)+' esami · media '+(c.avg_exam_grade==null?'—':String(c.avg_exam_grade).replace('.',',')+'/30')+' · migliore '+(c.best_exam_grade==null?'—':String(c.best_exam_grade).replace('.',',')+'/30')+'</div><div class="result-meta">Materia completa '+Number(c.full_seen_count||0)+' · da recuperare '+Number(c.pending_review_count||0)+' · segnate '+Number(c.marked_count||0)+'</div></div></div>').join('');
    const actions=self
      ?'<span class="pill ok-pill">🛡️ Amministratore</span>'
      :st==='pending'
@@ -451,9 +461,9 @@ function adminPage(){
       :st==='active'
        ?'<button class="btn ghost compact-btn" data-action="admin-status" data-user="'+esc(u.user_id)+'" data-status="suspended">Sospendi</button>'
        :'<button class="btn secondary compact-btn" data-action="admin-status" data-user="'+esc(u.user_id)+'" data-status="active">Riattiva</button>';
-   return '<div class="admin-user"><div><strong>'+esc(u.email||u.user_id)+'</strong><div class="result-meta">'+statusLabel+' · '+Number(u.course_count||0)+' materie · '+Number(u.attempt_count||0)+' tentativi · '+Number(u.exam_count||0)+' esami</div><div class="result-meta">Ultimo accesso: '+esc(u.last_sign_in_at?new Date(u.last_sign_in_at).toLocaleString('it-IT'):'—')+'</div></div><div class="actions">'+actions+'</div></div>';
+   return '<div class="admin-user"><div><strong>'+esc(u.email||u.user_id)+'</strong><div class="result-meta">'+statusLabel+' · '+Number(u.course_count||0)+' materie · '+Number(u.attempt_count||0)+' tentativi · '+Number(u.exam_count||0)+' esami'+(accuracy==null?'':' · rendimento '+String(accuracy).replace('.',',')+'%')+'</div><div class="result-meta">Ultimo accesso: '+esc(u.last_sign_in_at?new Date(u.last_sign_in_at).toLocaleString('it-IT'):'—')+'</div>'+(courseDetails?'<details class="admin-details"><summary>Statistiche dettagliate ▾</summary><div class="admin-course-list">'+courseDetails+'</div></details>':'')+'</div><div class="actions">'+actions+'</div></div>';
  }).join('');
- page('<div class="stack"><section class="card hero jungle-hero"><div class="eyebrow">Amministrazione</div><h1>Cabina di controllo 🌴</h1><div class="stats"><div class="stat"><span>In attesa</span><strong>'+pending+'</strong></div><div class="stat"><span>Attivi</span><strong>'+active+'</strong></div><div class="stat"><span>Sospesi</span><strong>'+suspended+'</strong></div><div class="stat"><span>Utenti</span><strong>'+users.length+'</strong></div></div></section><section class="card"><div class="section-head"><div><div class="eyebrow">Cloud</div><h3 class="section-title">Spazio occupato</h3></div><button class="btn ghost compact-btn" data-action="admin-refresh">Aggiorna</button></div><div class="stats"><div class="stat"><span>Database</span><strong>'+fmtBytes(storage.database_bytes)+'</strong></div><div class="stat"><span>Banche JSON</span><strong>'+fmtBytes(storage.banks_json_bytes)+'</strong></div><div class="stat"><span>Progressi JSON</span><strong>'+fmtBytes(storage.progress_json_bytes)+'</strong></div><div class="stat"><span>Tabelle QuizLab</span><strong>'+fmtBytes((Number(storage.banks_table_bytes)||0)+(Number(storage.progress_table_bytes)||0))+'</strong></div></div></section><section class="card"><div class="section-head"><div><div class="eyebrow">Utenti</div><h3 class="section-title">Approvazioni e accessi</h3></div></div><div class="admin-list">'+(rows||'<div class="empty">Nessun utente.</div>')+'</div></section></div>','Admin','Controllo accessi e cloud',true);
+ page('<div class="stack"><section class="card hero jungle-hero"><div class="eyebrow">Amministrazione</div><h1>Cabina di controllo 🌴</h1><div class="stats"><div class="stat"><span>In attesa</span><strong>'+pending+'</strong></div><div class="stat"><span>Attivi</span><strong>'+active+'</strong></div><div class="stat"><span>Sospesi</span><strong>'+suspended+'</strong></div><div class="stat"><span>Utenti</span><strong>'+users.length+'</strong></div></div></section><section class="card"><div class="section-head"><div><div class="eyebrow">Cloud</div><h3 class="section-title">Spazio occupato</h3></div><button class="btn ghost compact-btn" data-action="admin-refresh">Aggiorna</button></div><div class="stats"><div class="stat"><span>Database</span><strong>'+fmtBytes(storage.database_bytes)+'</strong></div><div class="stat"><span>Banche JSON</span><strong>'+fmtBytes(storage.banks_json_bytes)+'</strong></div><div class="stat"><span>Progressi JSON</span><strong>'+fmtBytes(storage.progress_json_bytes)+'</strong></div><div class="stat"><span>Tabelle QuizLab</span><strong>'+fmtBytes((Number(storage.banks_table_bytes)||0)+(Number(storage.progress_table_bytes)||0))+'</strong></div></div></section><section class="card"><div class="section-head"><div><div class="eyebrow">Utenti</div><h3 class="section-title">Approvazioni, accessi e statistiche</h3></div></div><div class="admin-list">'+(rows||'<div class="empty">Nessun utente.</div>')+'</div></section></div>','Admin','Controllo accessi e cloud',true);
 }
 function cloudPage(){
  const cfg=store.settings||{},user=cloudState.user;
