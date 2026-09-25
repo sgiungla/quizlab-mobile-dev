@@ -389,7 +389,16 @@ function backup(){download('QuizLab_Mobile_BACKUP_'+new Date().toISOString().sli
 function render(){if(route.name==='home')home();else if(route.name==='dashboard')dashboard();else if(route.name==='training')training(route.presetChapter);else if(route.name==='session')sessionView();else if(route.name==='results')results();else if(route.name==='review')reviewPage();else if(route.name==='search')searchPage();else if(route.name==='profile')profilePage();else if(route.name==='cloud')cloudPage();else home();}
 
 app.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b)return;const a=b.dataset.action;
-if(a==='back'){if(route.name==='dashboard')setRoute('home',null);else if(route.name==='session'){if(confirm('Uscire dalla sessione?'))setRoute('dashboard');}else setRoute('dashboard');return;}
+if(a==='back'){
+ if(route.name==='dashboard'){setRoute('home',null);return;}
+ if(route.name==='session'){
+  setRoute('dashboard');
+  if(cloudState.user&&navigator.onLine)await cloudSync({silent:true});
+  return;
+ }
+ setRoute('dashboard');
+ return;
+}
 if(a==='profile'){setRoute('profile',route.courseId);return;}
 if(a==='cloud'){setRoute('cloud',route.courseId);return;}
 if(a==='save-cloud-config'){
