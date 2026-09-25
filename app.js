@@ -14,6 +14,7 @@ let examTimer=null;
 let cloudState={status:'local-only',user:null};
 let autoSyncTimer=null;
 let syncInFlight=false;
+let lastSyncError=false;
 
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const norm=s=>String(s??'').replace(/\s+/g,' ').trim();
@@ -25,6 +26,39 @@ const clamp=(n,a,b)=>Math.min(b,Math.max(a,Number(n)||0));
 const gradeFromRatio=(correct,total)=>total?Math.round((correct/total)*300)/10:0;
 const fmtGrade=v=>Number.isFinite(Number(v))?(Number.isInteger(clamp(v,0,30))?clamp(v,0,30)+'/30':clamp(v,0,30).toFixed(1).replace('.',',')+'/30'):'—';
 const fmtDuration=ms=>{const t=Math.max(0,Math.floor((Number(ms)||0)/1000)),m=Math.floor(t/60),sec=t%60;return String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');};
+function fmtSyncAgo(iso){
+ if(!iso)return '';
+ const t=new Date(iso).getTime();if(!Number.isFinite(t))return '';
+ const sec=Math.max(0,Math.floor((Date.now()-t)/1000));
+ if(sec<45)return 'ora';
+ if(sec<3600)return Math.floor(sec/60)+' min fa';
+ const d=new Date(t),today=new Date();
+ if(d.toDateString()===today.toDateString())return 'oggi '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+ return d.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit'})+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+function syncBadgeModel(){
+ const dirty=(store.sync?.dirtyCourseIds||[]).length;
+ if(!cloudState.user)return {cls:'local',icon:'◇',label:'Solo locale',title:'Cloud non collegato'};
+ if(!navigator.onLine)return {cls:'offline',icon:'◌',label:dirty?('Offline · '+dirty+' in attesa'):'Offline',title:'App offline: i dati restano salvati sul dispositivo'};
+ if(syncInFlight)return {cls:'working',icon:'↻',label:'Sincronizzo…',title:'Sincronizzazione cloud in corso'};
+ if(lastSyncError)return {cls:'error',icon:'!',label:'Sync da verificare',title:'Ultima sincronizzazione non riuscita: tocca per riprovare'};
+ if(dirty)return {cls:'pending',icon:'↑',label:dirty+' da sincronizzare',title:'Modifiche locali in attesa di sincronizzazione automatica'};
+ const when=fmtSyncAgo(store.sync?.lastPullAt||store.sync?.lastPushAt);
+ return {cls:'ok',icon:'✓',label:'Sincronizzato'+(when?' · '+when:''),title:'Dati allineati con il cloud'};
+}
+function syncBadgeHtml(){
+ const m=syncBadgeModel();
+ return '<button class="cloud-badge '+m.cls+'" data-action="cloud" data-sync-badge title="'+esc(m.title)+'"><span class="cloud-badge-icon">'+esc(m.icon)+'</span><span>'+esc(m.label)+'</span></button>';
+}
+function refreshSyncBadge(){
+ const el=document.querySelector('[data-sync-badge]');
+ if(!el)return;
+ const m=syncBadgeModel();
+ el.className='cloud-badge '+m.cls;
+ el.title=m.title;
+ el.innerHTML='<span class="cloud-badge-icon">'+esc(m.icon)+'</span><span>'+esc(m.label)+'</span>';
+}
+
 
 function emptyCourse(subject=''){return {subject:norm(subject),officialBank:[],aiBank:[],topicMap:null,aiWorkflow:{},attempts:[],exams:[],marked:[],pendingReview:[],historicalWrong:[],fullCampaign:{signature:'all',seenIds:[],resetAt:null},createdAt:now(),updatedAt:now()};}
 function shape(c){
@@ -47,6 +81,7 @@ async function saveCourse(id,c,{bankDirty=false}={}){
  if(bankDirty)store.sync.dirtyBankCourseIds=uniq([...(store.sync.dirtyBankCourseIds||[]),id]);
  store.sync.lastLocalChangeAt=now();
  const saved=await saveStore(store);
+ refreshSyncBadge();
  scheduleAutoSync();
  return saved;
 }
@@ -101,7 +136,7 @@ function chapterBadge(x){
 }
 
 
-function top(title,sub,back){const dirty=(store.sync?.dirtyCourseIds||[]).length,user=cloudState.user;const syncLabel=user?'● cloud':'● locale';return '<header class="topbar"><div class="topbar-row">'+(back?'<button class="icon-btn" data-action="back">←</button>':'')+'<div class="brand">'+esc(title)+'<small>'+esc(sub||'')+'</small></div><div class="spacer"></div><button class="profile-chip" data-action="profile">'+avatarHtml('tiny')+'<span>'+(store.profile?.displayName?esc(store.profile.displayName.split(' ')[0]):'Profilo')+'</span></button><button class="sync sync-btn" data-action="cloud" title="'+(user?'Account cloud collegato':'Configura account cloud')+'">'+syncLabel+(dirty?' · '+dirty:'')+'</button></div></header>';}
+function top(title,sub,back){return '<header class="topbar"><div class="topbar-row">'+(back?'<button class="icon-btn" data-action="back">←</button>':'')+'<div class="brand">'+esc(title)+'<small>'+esc(sub||'')+'</small></div><div class="spacer"></div><button class="profile-chip" data-action="profile">'+avatarHtml('tiny')+'<span>'+(store.profile?.displayName?esc(store.profile.displayName.split(' ')[0]):'Profilo')+'</span></button>'+syncBadgeHtml()+'</div></header>';}
 function page(body,title='QuizLab Mobile DEV',sub='offline-first',back=false){app.innerHTML='<div>'+top(title,sub,back)+'<main class="main">'+body+'</main></div>';}
 function setRoute(name,courseId=route.courseId){if(examTimer){clearInterval(examTimer);examTimer=null;}route={name,courseId};session=null;render();}
 
@@ -232,7 +267,7 @@ function mergeRemoteCourses(rows=[]){
 }
 async function cloudSync({silent=true}={}){
  if(syncInFlight||!cloudState.user||!navigator.onLine)return false;
- syncInFlight=true;
+ syncInFlight=true;lastSyncError=false;refreshSyncBadge();
  try{
   const result=await sync.syncNow({
    dirtyCourseIds:[...(store.sync?.dirtyCourseIds||[])],
@@ -247,14 +282,16 @@ async function cloudSync({silent=true}={}){
   store.sync.lastPullAt=now();
   store.sync.mode='cloud-online';
   await saveStore(store);
+  lastSyncError=false;
   if(!silent)toast('Sincronizzazione completa ☁️');
   render();
   return true;
  }catch(e){
+  lastSyncError=true;
   console.warn('Cloud sync',e);
   if(!silent)alert('Sincronizzazione non riuscita:\n'+(e?.message||e));
   return false;
- }finally{syncInFlight=false;}
+ }finally{syncInFlight=false;refreshSyncBadge();}
 }
 function scheduleAutoSync(){
  if(!cloudState.user||!navigator.onLine)return;
@@ -293,7 +330,7 @@ function cloudPage(){
  }else if(!user){
   body+='<section class="card"><h2 class="section-title">Account</h2><label>Email<input id="authEmail" type="email" autocomplete="email"></label><label>Password<input id="authPassword" type="password" autocomplete="current-password" minlength="8"></label><div class="actions"><button class="btn" data-action="sign-in">Accedi</button><button class="btn secondary" data-action="sign-up">Crea account</button></div><button class="btn ghost" data-action="reset-cloud-config">Cambia configurazione cloud</button></section>';
  }else{
-  body+='<section class="card"><h2 class="section-title">Sincronizzazione</h2><div class="sync-panel"><div><span>Account</span><strong>'+esc(user.email||user.id)+'</strong></div><div><span>Stato</span><strong>Cloud collegato</strong></div><div><span>Dati locali da sincronizzare</span><strong>'+((store.sync?.dirtyCourseIds||[]).length)+' materie</strong></div></div><div class="actions"><button class="btn" data-action="sync-all">Sincronizza tutto</button><button class="btn secondary" data-action="push-profile">Sincronizza profilo</button><button class="btn ghost" data-action="sign-out">Esci</button></div><p class="subtle">La sincronizzazione è automatica. Il pulsante serve solo per forzarla subito manualmente.</p></section>';
+  body+='<section class="card"><h2 class="section-title">Sincronizzazione</h2><div class="sync-panel"><div><span>Account</span><strong>'+esc(user.email||user.id)+'</strong></div><div><span>Stato</span><strong>'+esc(syncBadgeModel().label)+'</strong></div><div><span>Ultima sincronizzazione</span><strong>'+esc(fmtSyncAgo(store.sync?.lastPullAt||store.sync?.lastPushAt)||'non ancora completata')+'</strong></div><div><span>Dati locali da sincronizzare</span><strong>'+((store.sync?.dirtyCourseIds||[]).length)+' materie</strong></div></div><div class="actions"><button class="btn" data-action="sync-all">Sincronizza tutto</button><button class="btn secondary" data-action="push-profile">Sincronizza profilo</button><button class="btn ghost" data-action="sign-out">Esci</button></div><p class="subtle">La sincronizzazione è automatica. Il pulsante serve solo per forzarla subito manualmente.</p></section>';
  }
  body+='</div>';page(body,'Cloud','Account e sync',true);
 }
