@@ -97,3 +97,11 @@
  .coverage-ring span{font-size:8px}
  .focus-chip{font-size:11px;padding:7px 9px}
 }
+
+
+.ring-pack{display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.coverage-ring small{display:block;margin-top:3px;font-size:8px;color:#64748b}
+@media(max-width:620px){
+ .hero-kpis{grid-template-columns:1fr}
+ .ring-pack{justify-content:flex-start}
+}
