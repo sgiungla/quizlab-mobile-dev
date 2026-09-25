@@ -190,6 +190,76 @@ begin
 end;
 $$;
 
+create or replace function public.quizlab_admin_user_course_stats()
+returns table (
+  user_id uuid,
+  course_id text,
+  subject text,
+  attempt_count bigint,
+  unique_question_count bigint,
+  correct_count bigint,
+  accuracy_pct numeric,
+  exam_count bigint,
+  avg_exam_grade numeric,
+  best_exam_grade numeric,
+  full_seen_count bigint,
+  pending_review_count bigint,
+  marked_count bigint,
+  last_activity timestamptz
+)
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+begin
+  if not public.quizlab_is_admin() then
+    raise exception 'forbidden' using errcode = '42501';
+  end if;
+
+  return query
+  select
+    uc.user_id,
+    b.course_id,
+    b.subject,
+    case when jsonb_typeof(uc.progress_json->'attempts')='array' then jsonb_array_length(uc.progress_json->'attempts') else 0 end::bigint,
+    coalesce((
+      select count(distinct a->>'questionId')
+      from jsonb_array_elements(case when jsonb_typeof(uc.progress_json->'attempts')='array' then uc.progress_json->'attempts' else '[]'::jsonb end) a
+      where coalesce(a->>'questionId','') <> ''
+    ),0)::bigint,
+    coalesce((
+      select count(*)
+      from jsonb_array_elements(case when jsonb_typeof(uc.progress_json->'attempts')='array' then uc.progress_json->'attempts' else '[]'::jsonb end) a
+      where lower(coalesce(a->>'correct','false'))='true'
+    ),0)::bigint,
+    coalesce((
+      select round(100.0 * count(*) filter (where lower(coalesce(a->>'correct','false'))='true') / nullif(count(*),0),1)
+      from jsonb_array_elements(case when jsonb_typeof(uc.progress_json->'attempts')='array' then uc.progress_json->'attempts' else '[]'::jsonb end) a
+    ),0)::numeric,
+    case when jsonb_typeof(uc.progress_json->'exams')='array' then jsonb_array_length(uc.progress_json->'exams') else 0 end::bigint,
+    (
+      select round(avg(nullif(e->>'grade','')::numeric),1)
+      from jsonb_array_elements(case when jsonb_typeof(uc.progress_json->'exams')='array' then uc.progress_json->'exams' else '[]'::jsonb end) e
+      where coalesce(e->>'grade','') ~ '^[0-9]+([.][0-9]+)?$'
+    ),
+    (
+      select max(nullif(e->>'grade','')::numeric)
+      from jsonb_array_elements(case when jsonb_typeof(uc.progress_json->'exams')='array' then uc.progress_json->'exams' else '[]'::jsonb end) e
+      where coalesce(e->>'grade','') ~ '^[0-9]+([.][0-9]+)?$'
+    ),
+    case when jsonb_typeof(uc.progress_json#>'{fullCampaign,seenIds}')='array' then jsonb_array_length(uc.progress_json#>'{fullCampaign,seenIds}') else 0 end::bigint,
+    case when jsonb_typeof(uc.progress_json->'pendingReview')='array' then jsonb_array_length(uc.progress_json->'pendingReview') else 0 end::bigint,
+    case when jsonb_typeof(uc.progress_json->'marked')='array' then jsonb_array_length(uc.progress_json->'marked') else 0 end::bigint,
+    uc.updated_at
+  from public.quizlab_user_courses uc
+  join public.quizlab_banks b on b.id=uc.bank_id
+  order by uc.updated_at desc;
+end;
+$$;
+
+revoke all on function public.quizlab_admin_user_course_stats() from public;
+grant execute on function public.quizlab_admin_user_course_stats() to authenticated;
+
 create or replace function public.quizlab_admin_set_user_status(
   target_user uuid,
   new_status text
