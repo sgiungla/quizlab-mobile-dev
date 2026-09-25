@@ -295,6 +295,7 @@ async function cloudSync({silent=true}={}){
 }
 function scheduleAutoSync(){
  if(!cloudState.user||!navigator.onLine)return;
+ if(session&&route.name==='session')return;
  clearTimeout(autoSyncTimer);
  autoSyncTimer=setTimeout(()=>cloudSync({silent:true}),1400);
 }
