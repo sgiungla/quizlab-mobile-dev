@@ -496,12 +496,28 @@ async function importPack(p){
  if(p.schema===BACKUP_SCHEMA){
   if(!p.store?.courses||typeof p.store.courses!=='object')throw new Error('Backup non valido');
   const importedEntries=Object.entries(p.store.courses);
-  const importedIds=importedEntries.map(([id])=>id);
   const nextCourses={...(store.courses||{})};
-  for(const [id,c] of importedEntries)nextCourses[id]=shape(c);
+  const importedIds=[];
+  const skippedIds=[];
+  for(const [id,rawCourse] of importedEntries){
+   const incoming=shape(rawCourse);
+   const existing=store.courses?.[id]?shape(store.courses[id]):null;
+   if(existing){
+    const incomingTs=Date.parse(incoming.updatedAt||incoming.createdAt||'')||0;
+    const existingTs=Date.parse(existing.updatedAt||existing.createdAt||'')||0;
+    const existingHasProgress=(existing.attempts?.length||0)+(existing.exams?.length||0)+(existing.marked?.length||0)+(existing.pendingReview?.length||0)+(existing.historicalWrong?.length||0)+(existing.fullCampaign?.seenIds?.length||0)>0;
+    if((existingTs&&incomingTs&&incomingTs<=existingTs)||(!incomingTs&&existingHasProgress)){
+     skippedIds.push(id);
+     continue;
+    }
+   }
+   nextCourses[id]=incoming;
+   importedIds.push(id);
+  }
 
   // Un backup desktop trasferisce solo dati di studio.
   // Account, profilo, dispositivo e configurazione cloud restano quelli dell'utente attuale.
+  // Un backup uguale o più vecchio non sovrascrive progressi già presenti.
   store.courses=nextCourses;
   store.profile=store.profile||{};
   store.settings=store.settings||{};
@@ -517,7 +533,7 @@ async function importPack(p){
   }else{
    scheduleAutoSync();
   }
-  return 'Backup importato · '+importedIds.length+' materie · progressi preservati';
+  return 'Backup elaborato · '+importedIds.length+' materie importate'+(skippedIds.length?' · '+skippedIds.length+' già presenti/più recenti non sovrascritte':'')+' · account e profilo preservati';
  }
  if(p.schema!==BANK_SCHEMA)throw new Error('Serve una Banca QuizLab COMPLETA o un Backup QuizLab.');
  const id=norm(p.course?.courseId),subject=norm(p.course?.subject||id);
