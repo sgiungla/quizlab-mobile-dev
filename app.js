@@ -460,7 +460,7 @@ function cloudPage(){
  }else if(!user){
   body+='<section class="card"><h2 class="section-title">Account</h2><label>Email<input id="authEmail" type="email" autocomplete="email"></label><label>Password<input id="authPassword" type="password" autocomplete="current-password" minlength="8"></label><div class="actions"><button class="btn" data-action="sign-in">Accedi</button><button class="btn secondary" data-action="sign-up">Crea account</button></div><button class="btn ghost" data-action="reset-cloud-config">Cambia configurazione cloud</button></section>';
  }else{
-  body+='<section class="card"><h2 class="section-title">Sincronizzazione</h2><div class="sync-panel"><div><span>Account</span><strong>'+esc(user.email||user.id)+'</strong></div><div><span>Stato</span><strong>'+esc(syncBadgeModel().label)+'</strong></div><div><span>Ultima sincronizzazione</span><strong>'+esc(fmtSyncAgo(store.sync?.lastPullAt||store.sync?.lastPushAt)||'non ancora completata')+'</strong></div><div><span>Dati locali da sincronizzare</span><strong>'+((store.sync?.dirtyCourseIds||[]).length)+' materie</strong></div></div><div class="actions"><button class="btn" data-action="sync-all">Sincronizza tutto</button><button class="btn secondary" data-action="push-profile">Sincronizza profilo</button><button class="btn ghost" data-action="sign-out">Esci</button></div><p class="subtle">La sincronizzazione è automatica. Il pulsante serve solo per forzarla subito manualmente.</p></section>';
+  body+='<section class="card"><h2 class="section-title">Sincronizzazione</h2><div class="sync-panel"><div><span>Account</span><strong>'+esc(user.email||user.id)+'</strong></div><div><span>Stato</span><strong>'+esc(syncBadgeModel().label)+'</strong></div><div><span>Ultima sincronizzazione</span><strong>'+esc(fmtSyncAgo(store.sync?.lastPullAt||store.sync?.lastPushAt)||'non ancora completata')+'</strong></div><div><span>Dati locali da sincronizzare</span><strong>'+((store.sync?.dirtyCourseIds||[]).length)+' materie</strong></div></div><div class="actions"><button class="btn" data-action="sync-all">Sincronizza tutto</button><button class="btn secondary" data-action="push-profile">Sincronizza profilo</button>'+(accessState.isAdmin?'<button class="btn secondary" data-action="open-admin">🛡️ Admin</button>':'')+'<button class="btn ghost" data-action="sign-out">Esci</button></div><p class="subtle">La sincronizzazione è automatica. Il pulsante serve solo per forzarla subito manualmente.</p></section>';
  }
  body+='</div>';page(body,'Cloud','Account e sync',true);
 }
@@ -506,6 +506,29 @@ if(a==='sign-in'){
  const {error}=await sync.signIn(email,password);if(error){alert(error.message);return;}toast('Accesso effettuato ☁️');return;
 }
 if(a==='sign-out'){await sync.signOut();toast('Disconnesso dal cloud');return;}
+if(a==='refresh-access'){
+ try{
+  accessState=await sync.accessState();
+  if(accessState.status==='active'){await hydrateCloudProfile();await cloudSync({silent:true});setRoute('home',null);}
+  else accessPage();
+ }catch(e){alert(e.message||e);}
+ return;
+}
+if(a==='open-admin'){
+ try{await refreshAdminData();setRoute('admin',null);}catch(e){alert('Dashboard Admin non disponibile:\n'+(e?.message||e));}
+ return;
+}
+if(a==='admin-refresh'){
+ try{await refreshAdminData();adminPage();}catch(e){alert(e.message||e);}
+ return;
+}
+if(a==='admin-status'){
+ const userId=b.dataset.user,status=b.dataset.status;
+ const label=status==='active'?'approvare/riattivare':'sospendere';
+ if(!confirm('Confermi di '+label+' questo account?'))return;
+ try{await sync.adminSetUserStatus(userId,status);await refreshAdminData();toast(status==='active'?'Account attivato ✅':'Account sospeso ⛔');adminPage();}catch(e){alert(e.message||e);}
+ return;
+}
 if(a==='push-profile'){try{await sync.upsertProfile(store.profile);store.sync.profileDirty=false;store.sync.lastPushAt=now();await saveStore(store);toast('Profilo sincronizzato ☁️');cloudPage();}catch(e){alert(e.message||e);}return;}
 if(a==='sync-all'){await cloudSync({silent:false});return;}
 
