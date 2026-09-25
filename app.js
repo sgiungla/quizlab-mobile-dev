@@ -175,7 +175,7 @@ function dashboard(){
  const weakList=chapterRowsUi.filter(x=>['weak','critical'].includes(x.level)).sort((a,b)=>(byCh.get(a.ch)?.grade??99)-(byCh.get(b.ch)?.grade??99)).slice(0,5);
  const weakChapters=chapterRowsUi.filter(x=>['weak','critical'].includes(x.level)).length,unseenChapters=chapterRowsUi.filter(x=>x.seenN===0).length;
  const weakHtml=weakList.length?weakList.map(x=>'<button class="focus-chip" data-action="train-chapter" data-chapter="'+x.ch+'"><span>Cap. '+x.ch+'</span><strong>'+x.grade+'</strong></button>').join(''):'<div class="focus-empty">Nessun capitolo critico per ora. La Sgiungla è tranquilla. 🌴</div>';
- page('<div class="stack"><section class="card hero jungle-hero"><div class="dashboard-welcome"><div><div class="eyebrow">'+esc(route.courseId)+'</div><h1>'+esc(c.subject)+'</h1><p class="jungle-line">'+esc(jungleLine(m))+'</p></div>'+avatarHtml('normal')+'</div><div class="hero-kpis"><div class="bank-total hero-total"><span>Domande in banca</span><strong>'+m.total+'</strong></div><div class="ring-pack">'+coverageRing(m)+statRing(m.accuracy*100,'rendimento',m.correct+'/'+m.attempted)+statRing(fullPct*100,'materia completa',seen.size+'/'+m.total)+'</div></div><div class="pill-row"><span class="pill off">'+m.official+' ufficiali</span><span class="pill ai">'+m.ai+' AI</span><span class="pill">'+m.attempted+' affrontate</span></div><div class="stats"><div class="stat"><span>Preparazione stimata β</span><strong>'+(m.attempted?'≈'+fmtGrade(m.preparation):'—')+'</strong><small>'+(m.attempted?(m.coverage<0.2&&!m.exams.length?'Affidabilità bassa':m.coverage<0.5||m.exams.length<2?'Affidabilità media':'Affidabilità alta'):'nessun dato')+'</small></div><div class="stat"><span>Domande uniche affrontate</span><strong>'+m.attempted+'</strong><small>su '+m.total+' in banca</small></div><div class="stat"><span>Rendimento viste</span><strong>'+(m.attempted?fmtGrade(m.masteryGrade):'—')+'</strong><small>'+(m.attempted?pct(m.accuracy):'nessun dato')+'</small></div><div class="stat"><span>Ultimo esame</span><strong>'+(m.lastExam?(m.lastExam.lode?'30L':fmtGrade(m.lastExam.grade)):'—')+'</strong><small>'+(m.lastExam?fmtDuration(m.lastExam.elapsedMs):'nessuna simulazione')+'</small></div><div class="stat"><span>Media ultime 5</span><strong>'+(m.avg5==null?'—':fmtGrade(m.avg5))+'</strong><small>'+(m.examTrend==null?'simulazioni':(m.examTrend>0?'↗ +':'↘ ')+String(m.examTrend).replace('.',',')+' vs 5 precedenti')+'</small></div><div class="stat"><span>Miglior esame</span><strong>'+(m.best==null?'—':fmtGrade(m.best))+'</strong><small>'+m.exams.length+' simulazioni</small></div><div class="stat"><span>Tentativi totali</span><strong>'+c.attempts.length+'</strong><small>'+(m.avgResponseMs?'tempo medio '+fmtDuration(m.avgResponseMs):'tempo medio —')+'</small></div><div class="stat"><span>Forma recente</span><strong>'+(m.recent20==null?'—':pct(m.recent20))+'</strong><small>ultime 20 risposte</small></div><div class="stat"><span>Percorso materia completa</span><strong>'+seen.size+'/'+m.total+'</strong><small>'+pct(fullPct)+' · '+remain+' rimanenti</small></div></div></section><section class="grid"><button class="card btn secondary" data-action="exam">🎓 Simulazione esame</button><button class="card btn secondary" data-action="training">🧠 Allenamento</button><button class="card btn secondary" data-action="review-page">⭐ Ripasso</button><button class="card btn secondary" data-action="search">🔎 Cerca banca</button></section><section class="card danger-zone"><div class="section-head"><div><div class="eyebrow">Gestione materia</div><h3 class="section-title">Reset separati come desktop</h3></div></div><div class="stack"><div><strong>Azzera performance</strong><p class="subtle">Cancella statistiche, tentativi, voti e simulazioni. Non tocca banca, ripasso o percorso “Materia completa”.</p><button class="btn danger-btn" data-action="reset-performance">♻️ Azzera performance</button></div><div><strong>Ricomincia ciclo</strong><p class="subtle">Azzera solo il percorso “Materia completa”.</p><button class="btn secondary" data-action="reset-cycle">🌱 Ricomincia ciclo</button></div><div><strong>Azzera ripasso</strong><p class="subtle">Cancella storico errori, coda recupero e domande segnate.</p><button class="btn secondary" data-action="reset-review">🧹 Azzera ripasso</button></div></div></section>'+'<section class="card"><div class="section-head"><div><div class="eyebrow">Trend</div><h3 class="section-title">Ultime simulazioni</h3></div><span class="pill">'+m.exams.length+' esami</span></div>'+examBars(m)+'</section><section class="card focus-card"><div class="section-head"><div><div class="eyebrow">Radar Sgiungla</div><h3 class="section-title">Capitoli da rinforzare</h3></div><span class="pill">'+weakChapters+' totali</span></div><div class="focus-list">'+weakHtml+'</div></section>'+(m.ai?'<section class="card"><h3 class="section-title">Performance per tipo</h3><div class="stats"><div class="stat"><span>Ufficiali</span><strong>'+(m.sourceMetrics.official.grade==null?'—':fmtGrade(m.sourceMetrics.official.grade))+'</strong><small>'+m.sourceMetrics.official.total+' uniche</small></div><div class="stat"><span>Rielaborate AI</span><strong>'+(m.sourceMetrics.ai.grade==null?'—':fmtGrade(m.sourceMetrics.ai.grade))+'</strong><small>'+m.sourceMetrics.ai.total+' uniche</small></div></div></section>':'')+'<details class="card collapse-card"><summary><div><div class="eyebrow">Analisi completa</div><h3 class="section-title">Performance per capitolo</h3><div class="pill-row"><span class="pill">'+chapters.length+' capitoli</span>'+(weakChapters?'<span class="pill warn-pill">'+weakChapters+' da rinforzare</span>':'<span class="pill ok-pill">nessuna criticità</span>')+(unseenChapters?'<span class="pill">'+unseenChapters+' non visti</span>':'')+'</div></div><span class="expand-hint">Apri ▾</span></summary><div class="collapse-body">'+chapterHtml+'</div></details><section class="card"><h3 class="section-title">Gestione QuizLab</h3><div class="actions"><button class="btn secondary" data-action="export" data-id="'+esc(route.courseId)+'">Esporta materia</button><button class="btn secondary" data-action="import">Importa / Ripristina</button><button class="btn secondary" data-action="backup">Backup completo</button></div></section></div>',c.subject,'Dashboard',true);
+ page('<div class="stack"><section class="card hero jungle-hero"><div class="dashboard-welcome"><div><div class="eyebrow">'+esc(route.courseId)+'</div><h1>'+esc(c.subject)+'</h1><p class="jungle-line">'+esc(jungleLine(m))+'</p></div>'+avatarHtml('normal')+'</div><div class="hero-kpis"><div class="bank-total hero-total"><span>Domande in banca</span><strong>'+m.total+'</strong></div><div class="ring-pack">'+coverageRing(m)+statRing(m.accuracy*100,'rendimento',m.correct+'/'+m.attempted)+statRing(fullPct*100,'materia completa',seen.size+'/'+m.total)+'</div></div><div class="pill-row"><span class="pill off">'+m.official+' ufficiali</span><span class="pill ai">'+m.ai+' AI</span><span class="pill">'+m.attempted+' affrontate</span></div><div class="stats"><div class="stat"><span>Preparazione stimata β</span><strong>'+(m.attempted?'≈'+fmtGrade(m.preparation):'—')+'</strong><small>'+(m.attempted?(m.coverage<0.2&&!m.exams.length?'Affidabilità bassa':m.coverage<0.5||m.exams.length<2?'Affidabilità media':'Affidabilità alta'):'nessun dato')+'</small></div><div class="stat"><span>Domande uniche affrontate</span><strong>'+m.attempted+'</strong><small>su '+m.total+' in banca</small></div><div class="stat"><span>Rendimento viste</span><strong>'+(m.attempted?fmtGrade(m.masteryGrade):'—')+'</strong><small>'+(m.attempted?pct(m.accuracy):'nessun dato')+'</small></div><div class="stat"><span>Ultimo esame</span><strong>'+(m.lastExam?(m.lastExam.lode?'30L':fmtGrade(m.lastExam.grade)):'—')+'</strong><small>'+(m.lastExam?fmtDuration(m.lastExam.elapsedMs):'nessuna simulazione')+'</small></div><div class="stat"><span>Media ultime 5</span><strong>'+(m.avg5==null?'—':fmtGrade(m.avg5))+'</strong><small>'+(m.examTrend==null?'simulazioni':(m.examTrend>0?'↗ +':'↘ ')+String(m.examTrend).replace('.',',')+' vs 5 precedenti')+'</small></div><div class="stat"><span>Miglior esame</span><strong>'+(m.best==null?'—':fmtGrade(m.best))+'</strong><small>'+m.exams.length+' simulazioni</small></div><div class="stat"><span>Tentativi totali</span><strong>'+c.attempts.length+'</strong><small>'+(m.avgResponseMs?'tempo medio '+fmtDuration(m.avgResponseMs):'tempo medio —')+'</small></div><div class="stat"><span>Forma recente</span><strong>'+(m.recent20==null?'—':pct(m.recent20))+'</strong><small>ultime 20 risposte</small></div><div class="stat"><span>Percorso materia completa</span><strong>'+seen.size+'/'+m.total+'</strong><small>'+pct(fullPct)+' · '+remain+' rimanenti</small></div></div></section><section class="grid"><button class="card btn secondary" data-action="exam">🎓 Simulazione esame</button><button class="card btn secondary" data-action="training">🧠 Allenamento</button><button class="card btn secondary" data-action="review-page">⭐ Ripasso</button><button class="card btn secondary" data-action="search">🔎 Cerca banca</button></section><section class="card danger-zone"><div class="section-head"><div><div class="eyebrow">Gestione materia</div><h3 class="section-title">Reset separati come desktop</h3></div></div><div class="stack"><div><strong>Azzera performance</strong><p class="subtle">Cancella statistiche, tentativi, voti e simulazioni. Non tocca banca, ripasso o percorso “Materia completa”.</p><button class="btn danger-btn" data-action="reset-performance">♻️ Azzera performance</button></div><div><strong>Ricomincia ciclo</strong><p class="subtle">Azzera solo il percorso “Materia completa”.</p><button class="btn secondary" data-action="reset-cycle">🌱 Ricomincia ciclo</button></div><div><strong>Azzera ripasso</strong><p class="subtle">Cancella storico errori, coda recupero e domande segnate.</p><button class="btn secondary" data-action="reset-review">🧹 Azzera ripasso</button></div></div></section>'+'<section class="card"><div class="section-head"><div><div class="eyebrow">Trend</div><h3 class="section-title">Ultime simulazioni</h3></div><span class="pill">'+m.exams.length+' esami</span></div>'+examBars(m)+'</section><section class="card focus-card"><div class="section-head"><div><div class="eyebrow">Radar Sgiungla</div><h3 class="section-title">Capitoli da rinforzare</h3></div><span class="pill">'+weakChapters+' totali</span></div><div class="focus-list">'+weakHtml+'</div></section>'+(m.ai?'<section class="card"><h3 class="section-title">Performance per tipo</h3><div class="stats"><div class="stat"><span>Ufficiali</span><strong>'+(m.sourceMetrics.official.grade==null?'—':fmtGrade(m.sourceMetrics.official.grade))+'</strong><small>'+m.sourceMetrics.official.total+' uniche</small></div><div class="stat"><span>Rielaborate AI</span><strong>'+(m.sourceMetrics.ai.grade==null?'—':fmtGrade(m.sourceMetrics.ai.grade))+'</strong><small>'+m.sourceMetrics.ai.total+' uniche</small></div></div></section>':'')+'<details class="card collapse-card"><summary><div><div class="eyebrow">Analisi completa</div><h3 class="section-title">Performance per capitolo</h3><div class="pill-row"><span class="pill">'+chapters.length+' capitoli</span>'+(weakChapters?'<span class="pill warn-pill">'+weakChapters+' da rinforzare</span>':'<span class="pill ok-pill">nessuna criticità</span>')+(unseenChapters?'<span class="pill">'+unseenChapters+' non visti</span>':'')+'</div></div><span class="expand-hint">Apri ▾</span></summary><div class="collapse-body">'+chapterHtml+'</div></details><section class="card"><h3 class="section-title">Gestione QuizLab</h3><div class="actions"><button class="btn secondary" data-action="export" data-id="'+esc(route.courseId)+'">Esporta materia</button><button class="btn secondary" data-action="import">Importa / Ripristina</button><button class="btn secondary" data-action="backup">Backup completo</button></div><div class="stack course-delete-box"><div><strong>Rimuovi da questo dispositivo</strong><p class="subtle">Nasconde la materia solo qui. Resta nel cloud e sugli altri dispositivi; una nuova importazione la rende di nuovo visibile.</p><button class="btn secondary" data-action="remove-local-course">📱 Rimuovi da questo dispositivo</button></div><div><strong>Elimina definitivamente</strong><p class="subtle">Cancella dal cloud banca e progressi della materia e la rimuove da questo dispositivo.</p><button class="btn danger-btn" data-action="delete-cloud-course">🗑️ Elimina definitivamente dal cloud</button></div></div></section></div>',c.subject,'Dashboard',true);
 }
 
 function training(presetChapter=null){
@@ -347,7 +347,9 @@ async function hydrateCloudProfile(){
  }catch(e){console.warn('Profile pull',e);}
 }
 function mergeRemoteCourses(rows=[]){
+ const hidden=new Set(store.sync?.hiddenCourseIds||[]);
  for(const remote of rows){
+  if(hidden.has(remote.courseId))continue;
   const local=shape(store.courses[remote.courseId]||emptyCourse(remote.subject||remote.courseId));
   const bank=remote.bank||{},progress=remote.progress||{};
   store.courses[remote.courseId]=shape({
@@ -555,6 +557,53 @@ function updateSearch(){const r=searchMatches(),box=document.getElementById('sea
 
 function normalizeQuestion(raw,source){if(!raw||typeof raw!=='object')return null;const options=(raw.options||[]).map((o,i)=>({letter:norm(o?.letter||['A','B','C','D'][i]).toUpperCase(),optionId:norm(o?.optionId||o?.id||('opt_'+(i+1))),text:norm(o?.text??o)})).filter(o=>/^[A-D]$/.test(o.letter)&&o.text);let correct=norm(raw.correct||raw.correctAnswer).toUpperCase();const coi=norm(raw.correctOptionId||raw.correct_option_id);if(coi){const m=options.find(o=>o.optionId===coi);if(m)correct=m.letter;}const chapter=Number(raw.chapter||raw.chapterNumber||0),text=norm(raw.text||raw.question);if(!raw.id||!chapter||!text||options.length!==4||!/^[A-D]$/.test(correct))return null;return {...raw,id:norm(raw.id),source,chapter,text,options,correct,correctOptionId:coi||options.find(o=>o.letter===correct)?.optionId||'',explanation:norm(raw.explanation||raw.spiegazione),reference:norm(raw.reference||raw.fonte||''),difficulty:['easy','medium','hard'].includes(String(raw.difficulty||'').toLowerCase())?String(raw.difficulty).toLowerCase():'medium'};}
 function mergeById(oldRows,newRows){const m=new Map((oldRows||[]).map(q=>[q.id,q]));for(const q of newRows)m.set(q.id,{...(m.get(q.id)||{}),...q});return [...m.values()];}
+async function removeCourseFromDevice(id){
+ const c=course(id);if(!c)return;
+ if(!confirm('Rimuovere “'+(c.subject||id)+'” solo da questo dispositivo?\n\nLa materia resterà nel cloud e sugli altri dispositivi.'))return;
+ delete store.courses[id];
+ store.sync=store.sync||{};
+ store.sync.hiddenCourseIds=uniq([...(store.sync.hiddenCourseIds||[]),id]);
+ store.sync.dirtyCourseIds=(store.sync.dirtyCourseIds||[]).filter(x=>x!==id);
+ store.sync.dirtyBankCourseIds=(store.sync.dirtyBankCourseIds||[]).filter(x=>x!==id);
+ store.sync.lastLocalChangeAt=now();
+ store=await saveStore(store);
+ route={name:'home',courseId:null};session=null;
+ toast('Materia rimossa solo da questo dispositivo');
+ render();
+}
+
+async function deleteCourseEverywhere(id){
+ const c=course(id);if(!c)return;
+ const subject=c.subject||id;
+ if(!cloudState.user||accessState.status!=='active'){
+  alert('Per eliminare definitivamente dal cloud devi essere collegato con un account attivo.');
+  return;
+ }
+ if(!navigator.onLine){
+  alert('Per l’eliminazione definitiva serve una connessione Internet.');
+  return;
+ }
+ if(!confirm('ELIMINAZIONE DEFINITIVA\n\nEliminare “'+subject+'” dal cloud e da questo dispositivo?\n\nVerranno cancellati banca, progressi, tentativi, esami e ripasso associati alla materia. Questa operazione non è annullabile salvo backup.'))return;
+ const typed=prompt('Per confermare scrivi ELIMINA');
+ if(typed!=='ELIMINA'){toast('Eliminazione annullata');return;}
+ try{
+  await sync.deleteCloudCourse(id);
+  delete store.courses[id];
+  store.sync=store.sync||{};
+  store.sync.hiddenCourseIds=(store.sync.hiddenCourseIds||[]).filter(x=>x!==id);
+  store.sync.dirtyCourseIds=(store.sync.dirtyCourseIds||[]).filter(x=>x!==id);
+  store.sync.dirtyBankCourseIds=(store.sync.dirtyBankCourseIds||[]).filter(x=>x!==id);
+  store.sync.lastLocalChangeAt=now();
+  store.sync.lastPushAt=now();
+  store=await saveStore(store);
+  route={name:'home',courseId:null};session=null;
+  toast('Materia eliminata definitivamente ☁️');
+  render();
+ }catch(e){
+  alert('Eliminazione non riuscita:\n'+(e?.message||e));
+ }
+}
+
 async function importPack(p){
  if(!p||typeof p!=='object')throw new Error('JSON non valido');
  if(p.schema===BACKUP_SCHEMA){
@@ -586,6 +635,7 @@ async function importPack(p){
   store.profile=store.profile||{};
   store.settings=store.settings||{};
   store.sync=store.sync||{};
+  store.sync.hiddenCourseIds=(store.sync.hiddenCourseIds||[]).filter(id=>!importedIds.includes(id));
   store.sync.dirtyCourseIds=uniq([...(store.sync.dirtyCourseIds||[]),...importedIds]);
   store.sync.dirtyBankCourseIds=uniq([...(store.sync.dirtyBankCourseIds||[]),...importedIds]);
   store.sync.lastLocalChangeAt=now();
@@ -610,6 +660,7 @@ async function importPack(p){
  c.aiBank=mergeById(c.aiBank,ai);
  if(p.topicMap)c.topicMap=p.topicMap;
  if(p.aiWorkflow)c.aiWorkflow={...c.aiWorkflow,...p.aiWorkflow};
+ store.sync.hiddenCourseIds=(store.sync.hiddenCourseIds||[]).filter(x=>x!==id);
  await saveCourse(id,c,{bankDirty:true});
  return subject+': '+off.length+' ufficiali · '+ai.length+' AI';
 }
@@ -686,6 +737,8 @@ if(a==='train-chapter'){route.presetChapter=Number(b.dataset.chapter);route.name
 if(a==='start-chapter'){const c=course(),ch=Number(document.getElementById('chapterSelect').value),src=document.getElementById('chapterSource').value,p=filterSource(qbank(c).filter(q=>Number(q.chapter)===ch),src),n=amountValue('chapterAmount',p.length);startSession(selectTraining(p,n,src),'Allenamento capitolo '+ch,'chapter');return;}
 if(a==='start-range'){const c=course(),f=Number(document.getElementById('rangeFrom').value),t=Number(document.getElementById('rangeTo').value),src=document.getElementById('rangeSource').value,p=filterSource(qbank(c).filter(q=>Number(q.chapter)>=Math.min(f,t)&&Number(q.chapter)<=Math.max(f,t)),src),n=amountValue('rangeAmount',p.length);startSession(selectTraining(p,n,src),'Intervallo capitoli '+Math.min(f,t)+'–'+Math.max(f,t),'range');return;}
 if(a==='start-full'){const c=course(),src=document.getElementById('fullSource').value,remain=filterSource(qbank(c),src).filter(q=>!(c.fullCampaign?.seenIds||[]).includes(q.id)),n=amountValue('fullAmount',remain.length),qs=await fullCampaignPool(c,n,src);startSession(qs,'Materia completa','full');return;}
+if(a==='remove-local-course'){await removeCourseFromDevice(route.courseId);return;}
+if(a==='delete-cloud-course'){await deleteCourseEverywhere(route.courseId);return;}
 if(a==='reset-cycle'){resetCycle();return;}
 if(a==='reset-performance'){await resetPerformance();return;}
 if(a==='reset-review'){await resetReview();return;}
