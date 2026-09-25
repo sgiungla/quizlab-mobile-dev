@@ -1,11 +1,11 @@
 {
-  "name":"QuizLab Mobile DEV",
-  "short_name":"QuizLab DEV",
-  "description":"QuizLab offline-first per le banche UniSgiunglaLab.",
+  "name":"QuizLab · Sgiungla",
+  "short_name":"QuizLab",
+  "description":"QuizLab offline-first per studiare nella Sgiungla universitaria.",
   "start_url":"./",
   "scope":"./",
   "display":"standalone",
   "background_color":"#020617",
-  "theme_color":"#020617",
+  "theme_color":"#052e16",
   "icons":[{"src":"./icons/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
 }
