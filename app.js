@@ -1,5 +1,6 @@
 import {loadStore,saveStore,emptyStore} from './db.js';
 import {QuizLabSyncAdapter} from './sync-adapter.js';
+import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
 
 const BANK_SCHEMA='unisgiunglalab.quizlab.bank';
 const BACKUP_SCHEMA='unisgiunglalab.quizlab.backup';
@@ -244,6 +245,26 @@ async function handleAvatar(e){
  const reader=new FileReader();reader.onload=async()=>{store.profile.avatarDataUrl=String(reader.result||'');store.profile.updatedAt=now();store.sync.profileDirty=true;store.sync.lastLocalChangeAt=now();await saveStore(store);toast('Foto profilo aggiornata');profilePage();};reader.readAsDataURL(f);
 }
 
+async function applyDefaultCloudConfig(){
+ const d=DEFAULT_CLOUD_CONFIG||{};
+ if(!store.settings)store.settings={};
+ let changed=false;
+ if(!store.settings.supabaseUrl&&d.supabaseUrl){store.settings.supabaseUrl=d.supabaseUrl;changed=true;}
+ if(!store.settings.supabasePublishableKey&&d.supabasePublishableKey){store.settings.supabasePublishableKey=d.supabasePublishableKey;changed=true;}
+ if(changed)await saveStore(store);
+}
+async function hydrateCloudProfile(){
+ if(!cloudState.user)return;
+ try{
+  const p=await sync.pullProfile();
+  if(!p)return;
+  store.profile.displayName=p.display_name||store.profile.displayName||'';
+  store.profile.motto=p.motto||store.profile.motto||'La giungla universitaria è sotto controllo.';
+  store.profile.updatedAt=p.updated_at||store.profile.updatedAt;
+  store.sync.profileDirty=false;
+  await saveStore(store);
+ }catch(e){console.warn('Profile pull',e);}
+}
 function mergeRemoteCourses(rows=[]){
  for(const remote of rows){
   const local=shape(store.courses[remote.courseId]||emptyCourse(remote.subject||remote.courseId));
@@ -313,6 +334,7 @@ function scheduleAutoSync(){
 }
 async function startCloud(){
  try{
+  await applyDefaultCloudConfig();
   cloudState=await sync.start({
    settings:store.settings||{},
    onAuthChange:async ({session,status})=>{
@@ -320,13 +342,20 @@ async function startCloud(){
     store.sync.mode=status;
     if(session?.user)store.sync.ownerId=session.user.id;
     await saveStore(store);
+    if(session?.user){
+      await hydrateCloudProfile();
+      await cloudSync({silent:true});
+      route.name='home';
+    }else if(sync.configured(store.settings||{})){
+      route.name='cloud';
+    }
     render();
-    if(session?.user)setTimeout(()=>cloudSync({silent:true}),0);
    }
   });
   if(cloudState.user){
     store.sync.ownerId=cloudState.user.id;
     await saveStore(store);
+    await hydrateCloudProfile();
     await cloudSync({silent:true});
   }
  }catch(e){
@@ -339,7 +368,7 @@ function cloudPage(){
  const configured=!!(cfg.supabaseUrl&&cfg.supabasePublishableKey);
  let body='<div class="stack"><section class="card hero jungle-hero"><div class="eyebrow">Cloud Sgiungla</div><h1>'+(user?'Account collegato ☁️':'Collega il tuo account')+'</h1><p class="subtle">'+(user?'Sei autenticato come '+esc(user.email||'utente')+'.':'Il database è pronto. Ora colleghiamo questa PWA al tuo account Supabase.')+'</p></section>';
  if(!configured){
-  body+='<section class="card"><h2 class="section-title">Configurazione cloud</h2><label>Project URL<input id="cloudUrl" placeholder="https://...supabase.co"></label><label>Publishable key<input id="cloudKey" placeholder="sb_publishable_..."></label><button class="btn" data-action="save-cloud-config">Salva collegamento</button><p class="subtle">Usa solo la Publishable key. Non inserire mai Secret / service-role key.</p></section>';
+  body+='<section class="card"><h2 class="section-title">Cloud non disponibile</h2><p class="subtle">La configurazione cloud della build non è completa. Un utente normale non deve inserire URL o chiavi tecniche.</p></section>';
  }else if(!user){
   body+='<section class="card"><h2 class="section-title">Account</h2><label>Email<input id="authEmail" type="email" autocomplete="email"></label><label>Password<input id="authPassword" type="password" autocomplete="current-password" minlength="8"></label><div class="actions"><button class="btn" data-action="sign-in">Accedi</button><button class="btn secondary" data-action="sign-up">Crea account</button></div><button class="btn ghost" data-action="reset-cloud-config">Cambia configurazione cloud</button></section>';
  }else{
@@ -413,5 +442,5 @@ if(a==='study-search'){startSession(searchMatches(),'Studio risultati','study');
 
 picker.addEventListener('change',async()=>{const f=picker.files?.[0];if(!f)return;try{const msg=await importPack(JSON.parse(await f.text()));toast('Importazione OK · '+msg);render();}catch(e){alert('Importazione non riuscita:\n'+(e?.message||e));}});
 
-async function init(){store=await loadStore();if(!store.courses||typeof store.courses!=='object')store=emptyStore();for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await startCloud();window.addEventListener('online',()=>cloudSync({silent:true}));render();if('serviceWorker'in navigator)try{await navigator.serviceWorker.register('./service-worker.js');}catch(e){console.warn(e);}}
+async function init(){store=await loadStore();if(!store.courses||typeof store.courses!=='object')store=emptyStore();for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await applyDefaultCloudConfig();await startCloud();if(!cloudState.user&&sync.configured(store.settings||{}))route.name='cloud';window.addEventListener('online',()=>cloudSync({silent:true}));render();if('serviceWorker'in navigator)try{await navigator.serviceWorker.register('./service-worker.js');}catch(e){console.warn(e);}}
 init().catch(e=>{app.innerHTML='<main class="main"><section class="card"><h2>Errore avvio</h2><p>'+esc(e?.message||e)+'</p></section></main>';});
