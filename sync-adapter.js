@@ -119,6 +119,13 @@ export class QuizLabSyncAdapter {
     return Array.isArray(data)?(data[0]||null):data;
   }
 
+  async adminUserCourseStats(){
+    this.requireUser();
+    const {data,error}=await this.client.rpc('quizlab_admin_user_course_stats');
+    if(error) throw error;
+    return data||[];
+  }
+
   async adminSetUserStatus(userId,status){
     this.requireUser();
     const {data,error}=await this.client.rpc('quizlab_admin_set_user_status',{target_user:userId,new_status:status});
