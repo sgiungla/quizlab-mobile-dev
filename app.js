@@ -13,6 +13,8 @@ let session=null;
 let toastTimer=null;
 let examTimer=null;
 let cloudState={status:'local-only',user:null};
+let accessState={status:'active',isAdmin:false,legacy:true};
+let adminData={users:[],storage:null,loaded:false};
 let autoSyncTimer=null;
 let syncInFlight=false;
 let lastSyncError=false;
@@ -27,6 +29,14 @@ const clamp=(n,a,b)=>Math.min(b,Math.max(a,Number(n)||0));
 const gradeFromRatio=(correct,total)=>total?Math.round((correct/total)*300)/10:0;
 const fmtGrade=v=>Number.isFinite(Number(v))?(Number.isInteger(clamp(v,0,30))?clamp(v,0,30)+'/30':clamp(v,0,30).toFixed(1).replace('.',',')+'/30'):'—';
 const fmtDuration=ms=>{const t=Math.max(0,Math.floor((Number(ms)||0)/1000)),m=Math.floor(t/60),sec=t%60;return String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');};
+function fmtBytes(n){
+ const v=Number(n)||0;
+ if(v<1024)return v+' B';
+ if(v<1024*1024)return (v/1024).toFixed(1).replace('.',',')+' KB';
+ if(v<1024*1024*1024)return (v/1024/1024).toFixed(1).replace('.',',')+' MB';
+ return (v/1024/1024/1024).toFixed(2).replace('.',',')+' GB';
+}
+
 function fmtSyncAgo(iso){
  if(!iso)return '';
  const t=new Date(iso).getTime();if(!Number.isFinite(t))return '';
@@ -40,6 +50,8 @@ function fmtSyncAgo(iso){
 function syncBadgeModel(){
  const dirty=(store.sync?.dirtyCourseIds||[]).length;
  if(!cloudState.user)return {cls:'local',icon:'◇',label:'Solo locale',title:'Cloud non collegato'};
+ if(accessState.status==='pending')return {cls:'pending',icon:'⌛',label:'In attesa',title:'Account in attesa di approvazione'};
+ if(accessState.status==='suspended')return {cls:'error',icon:'⛔',label:'Sospeso',title:'Account sospeso'};
  if(!navigator.onLine)return {cls:'offline',icon:'◌',label:dirty?('Offline · '+dirty+' in attesa'):'Offline',title:'App offline: i dati restano salvati sul dispositivo'};
  if(syncInFlight)return {cls:'working',icon:'↻',label:'Sincronizzo…',title:'Sincronizzazione cloud in corso'};
  if(lastSyncError)return {cls:'error',icon:'!',label:'Sync da verificare',title:'Ultima sincronizzazione non riuscita: tocca per riprovare'};
