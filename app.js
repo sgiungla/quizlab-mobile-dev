@@ -340,8 +340,26 @@ function mergeRemoteCourses(rows=[]){
   });
  }
 }
+async function refreshAccessGate({renderBlocked=true}={}){
+ if(!cloudState.user)return {status:'signed-out',isAdmin:false};
+ try{
+  accessState=await sync.accessState();
+  if(accessState.status!=='active'){
+   clearTimeout(autoSyncTimer);
+   if(examTimer){clearInterval(examTimer);examTimer=null;}
+   session=null;
+   route.name='access';
+   if(renderBlocked)accessPage();
+  }
+  return accessState;
+ }catch(e){
+  console.warn('Access gate',e);
+  return accessState;
+ }
+}
 async function cloudSync({silent=true}={}){
  if(syncInFlight||!cloudState.user||!navigator.onLine)return false;
+ if(accessState.status!=='active'){route.name='access';render();return false;}
  const changeToken=store.sync?.lastLocalChangeAt||null;
  const dirtyAtStart=[...(store.sync?.dirtyCourseIds||[])];
  const bankDirtyAtStart=[...(store.sync?.dirtyBankCourseIds||[])];
@@ -371,6 +389,13 @@ async function cloudSync({silent=true}={}){
  }catch(e){
   lastSyncError=true;
   console.warn('Cloud sync',e);
+  const checked=await refreshAccessGate({renderBlocked:false});
+  if(checked?.status&&checked.status!=='active'){
+   lastSyncError=false;
+   route.name='access';
+   render();
+   return false;
+  }
   if(!silent)alert('Sincronizzazione non riuscita:\n'+(e?.message||e));
   return false;
  }finally{
@@ -552,7 +577,10 @@ async function importPack(p){
 function exportCourse(id){const c=course(id);if(!c)return;download(fileName(c.subject)+'_QuizLab_banca_COMPLETA_mobile.json',{schema:BANK_SCHEMA,version:2,exportedAt:now(),course:{courseId:id,subject:c.subject},officialBank:c.officialBank,aiBank:c.aiBank,topicMap:c.topicMap,aiWorkflow:c.aiWorkflow});}
 function backup(){download('QuizLab_Mobile_BACKUP_'+new Date().toISOString().slice(0,10)+'.json',{schema:BACKUP_SCHEMA,version:1,exportedAt:now(),store});}
 
-function render(){if(route.name==='home')home();else if(route.name==='dashboard')dashboard();else if(route.name==='training')training(route.presetChapter);else if(route.name==='session')sessionView();else if(route.name==='results')results();else if(route.name==='review')reviewPage();else if(route.name==='search')searchPage();else if(route.name==='profile')profilePage();else if(route.name==='cloud')cloudPage();else if(route.name==='access')accessPage();else if(route.name==='admin')adminPage();else home();}
+function render(){
+ if(cloudState.user&&accessState.status!=='active'&&route.name!=='access'){route.name='access';session=null;}
+ if(route.name==='home')home();else if(route.name==='dashboard')dashboard();else if(route.name==='training')training(route.presetChapter);else if(route.name==='session')sessionView();else if(route.name==='results')results();else if(route.name==='review')reviewPage();else if(route.name==='search')searchPage();else if(route.name==='profile')profilePage();else if(route.name==='cloud')cloudPage();else if(route.name==='access')accessPage();else if(route.name==='admin')adminPage();else home();
+}
 
 app.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b)return;const a=b.dataset.action;
 if(a==='back'){
@@ -586,9 +614,9 @@ if(a==='sign-in'){
 if(a==='sign-out'){await sync.signOut();toast('Disconnesso dal cloud');return;}
 if(a==='refresh-access'){
  try{
-  accessState=await sync.accessState();
+  await refreshAccessGate({renderBlocked:false});
   if(accessState.status==='active'){await hydrateCloudProfile();await cloudSync({silent:true});setRoute('home',null);}
-  else accessPage();
+  else{route.name='access';render();}
  }catch(e){alert(e.message||e);}
  return;
 }
@@ -642,5 +670,5 @@ if(a==='study-search'){startSession(searchMatches(),'Studio risultati','study');
 
 picker.addEventListener('change',async()=>{const f=picker.files?.[0];if(!f)return;try{const msg=await importPack(JSON.parse(await f.text()));toast('Importazione OK · '+msg);render();}catch(e){alert('Importazione non riuscita:\n'+(e?.message||e));}});
 
-async function init(){store=await loadStore();if(!store.courses||typeof store.courses!=='object')store=emptyStore();for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await applyDefaultCloudConfig();await startCloud();if(!cloudState.user&&sync.configured(store.settings||{}))route.name='cloud';window.addEventListener('online',()=>cloudSync({silent:true}));render();if('serviceWorker'in navigator)try{await navigator.serviceWorker.register('./service-worker.js');}catch(e){console.warn(e);}}
+async function init(){store=await loadStore();if(!store.courses||typeof store.courses!=='object')store=emptyStore();for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await applyDefaultCloudConfig();await startCloud();if(!cloudState.user&&sync.configured(store.settings||{}))route.name='cloud';window.addEventListener('online',async()=>{await refreshAccessGate({renderBlocked:false});if(accessState.status==='active')cloudSync({silent:true});else render();});window.addEventListener('focus',()=>refreshAccessGate());document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshAccessGate();});render();if('serviceWorker'in navigator)try{await navigator.serviceWorker.register('./service-worker.js');}catch(e){console.warn(e);}}
 init().catch(e=>{app.innerHTML='<main class="main"><section class="card"><h2>Errore avvio</h2><p>'+esc(e?.message||e)+'</p></section></main>';});
