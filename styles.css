@@ -124,3 +124,7 @@
 .cloud-badge.local{border-color:#334155;background:#0f172a;color:#94a3b8}
 @keyframes cloudspin{to{transform:rotate(360deg)}}
 @media(max-width:520px){.cloud-badge{max-width:138px;overflow:hidden;text-overflow:ellipsis}.cloud-badge span:last-child{overflow:hidden;text-overflow:ellipsis}}
+
+.danger-zone{border-color:#7f1d1d;background:linear-gradient(180deg,rgba(69,10,10,.28),rgba(15,23,42,.98))}
+.danger-btn{background:#7f1d1d;color:#fee2e2;border:1px solid #991b1b}
+.danger-btn:hover{background:#991b1b}
