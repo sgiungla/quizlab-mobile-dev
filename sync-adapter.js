@@ -222,8 +222,13 @@ export class QuizLabSyncAdapter {
   }
 
   async syncNow(payload={}){
+    const dirtyIds=new Set(payload.dirtyCourseIds||[]);
     const push=await this.pushChanges(payload);
     const pull=await this.pullChanges(payload);
+    if(dirtyIds.size && Array.isArray(pull.courses)){
+      pull.courses=pull.courses.filter(course=>!dirtyIds.has(course.courseId));
+      pull.pulled=pull.courses.length;
+    }
     return {status:this.status,push,pull};
   }
 }
