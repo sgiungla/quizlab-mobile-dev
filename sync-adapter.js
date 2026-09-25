@@ -107,23 +107,37 @@ export class QuizLabSyncAdapter {
     };
   }
 
-  async pushCourse(courseId,course={}){
+  async pushCourse(courseId,course={},options={}){
     const user=this.requireUser();
     const now=new Date().toISOString();
-    const bankRow={
-      owner_id:user.id,
-      course_id:courseId,
-      subject:course.subject||courseId,
-      bank_json:this.bankPayload(course),
-      is_shared:false,
-      updated_at:now
-    };
-    const {data:bank,error:bankError}=await this.client
-      .from('quizlab_banks')
-      .upsert(bankRow,{onConflict:'owner_id,course_id'})
-      .select('id')
-      .single();
-    if(bankError) throw bankError;
+    let bank=null;
+    if(options.bankDirty){
+      const bankRow={
+        owner_id:user.id,
+        course_id:courseId,
+        subject:course.subject||courseId,
+        bank_json:this.bankPayload(course),
+        is_shared:false,
+        updated_at:now
+      };
+      const {data,error}=await this.client
+        .from('quizlab_banks')
+        .upsert(bankRow,{onConflict:'owner_id,course_id'})
+        .select('id')
+        .single();
+      if(error) throw error;
+      bank=data;
+    }else{
+      const {data,error}=await this.client
+        .from('quizlab_banks')
+        .select('id')
+        .eq('owner_id',user.id)
+        .eq('course_id',courseId)
+        .maybeSingle();
+      if(error) throw error;
+      if(data) bank=data;
+      else return this.pushCourse(courseId,course,{bankDirty:true});
+    }
 
     const {data:existing,error:revError}=await this.client
       .from('quizlab_user_courses')
@@ -162,11 +176,12 @@ export class QuizLabSyncAdapter {
 
   async pushChanges(payload={}){
     const ids=[...(payload.dirtyCourseIds||[])];
+    const bankDirty=new Set(payload.dirtyBankCourseIds||[]);
     const courses=payload.courses||{};
     const pushed=[];
     for(const id of ids){
       if(!courses[id]) continue;
-      pushed.push(await this.pushCourse(id,courses[id]));
+      pushed.push(await this.pushCourse(id,courses[id],{bankDirty:bankDirty.has(id)}));
     }
     await this.touchDevice(payload.clientId,{push:true});
     return {status:this.status,provider:this.provider,pushed:pushed.length,items:pushed};
