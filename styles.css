@@ -105,3 +105,7 @@
  .hero-kpis{grid-template-columns:1fr}
  .ring-pack{justify-content:flex-start}
 }
+
+
+.sync-btn{border:0;background:transparent;padding:0;cursor:pointer;font:inherit}
+.sync-btn:hover{text-decoration:underline}
