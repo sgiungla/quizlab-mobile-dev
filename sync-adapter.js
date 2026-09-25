@@ -252,6 +252,23 @@ export class QuizLabSyncAdapter {
     return {courseId,deleted:(data||[]).length};
   }
 
+  async retiredCourseIds(){
+    this.requireUser();
+    const {data,error}=await this.client.rpc('quizlab_retired_course_ids');
+    if(error){
+      if(error.code==='42883') return [];
+      throw error;
+    }
+    return (data||[]).map(x=>typeof x==='string'?x:x?.course_id).filter(Boolean);
+  }
+
+  async adminRetireCourse(courseId){
+    this.requireUser();
+    const {data,error}=await this.client.rpc('quizlab_admin_retire_course',{target_course_id:courseId});
+    if(error) throw error;
+    return data||{};
+  }
+
   async touchDevice(clientId,{push=false,pull=false}={}){
     const user=this.requireUser();
     if(!clientId) return;
@@ -313,13 +330,20 @@ export class QuizLabSyncAdapter {
   }
 
   async syncNow(payload={}){
-    const dirtyIds=new Set(payload.dirtyCourseIds||[]);
-    const push=await this.pushChanges(payload);
+    const retiredCourseIds=await this.retiredCourseIds();
+    const retired=new Set(retiredCourseIds);
+    const safePayload={
+      ...payload,
+      dirtyCourseIds:[...(payload.dirtyCourseIds||[])].filter(id=>!retired.has(id)),
+      dirtyBankCourseIds:[...(payload.dirtyBankCourseIds||[])].filter(id=>!retired.has(id))
+    };
+    const dirtyIds=new Set(safePayload.dirtyCourseIds||[]);
+    const push=await this.pushChanges(safePayload);
     const pull=await this.pullChanges(payload);
-    if(dirtyIds.size && Array.isArray(pull.courses)){
-      pull.courses=pull.courses.filter(course=>!dirtyIds.has(course.courseId));
+    if(Array.isArray(pull.courses)){
+      pull.courses=pull.courses.filter(course=>!retired.has(course.courseId)&&!dirtyIds.has(course.courseId));
       pull.pulled=pull.courses.length;
     }
-    return {status:this.status,push,pull};
+    return {status:this.status,push,pull,retiredCourseIds};
   }
 }
