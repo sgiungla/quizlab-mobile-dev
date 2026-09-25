@@ -284,7 +284,13 @@ function reviewPage(){const c=course();page('<div class="stack"><section class="
 
 function profilePage(){
  const p=store.profile||{};
- page('<div class="stack"><section class="card hero jungle-hero"><div class="profile-hero">'+avatarHtml('large')+'<div><div class="eyebrow">Identità Sgiungla</div><h1>'+(p.displayName?esc(p.displayName):'Il tuo profilo')+'</h1><p class="subtle">Questo profilo è locale e già strutturato per diventare il tuo account quando attiveremo il cloud.</p></div></div></section><section class="card"><h2 class="section-title">Profilo</h2><label>Nome<input id="profileName" maxlength="60" placeholder="Come vuoi essere chiamato" value="'+esc(p.displayName||'')+'"></label><label>Frase Sgiungla<input id="profileMotto" maxlength="120" value="'+esc(p.motto||'La giungla universitaria è sotto controllo.')+'"></label><div class="actions"><button class="btn secondary" data-action="avatar-pick">📷 Cambia foto</button><button class="btn" data-action="save-profile">Salva profilo</button></div><input id="avatarPicker" type="file" accept="image/*" hidden></section><section class="card"><h3 class="section-title">Sincronizzazione</h3><div class="sync-panel"><div><span>Identità locale</span><strong>'+esc(p.localUserId||store.sync?.ownerId||'—')+'</strong></div><div><span>Dispositivo</span><strong>'+esc(store.sync?.clientId||'—')+'</strong></div><div><span>Stato</span><strong>Pronto per il cloud · non ancora collegato</strong></div></div><p class="subtle">Quando abiliteremo gli account, banca e progressi saranno separati per utente. La stessa web app potrà quindi essere usata da te e dalla tua amica senza mescolare i dati.</p></section></div>','Profilo','Sgiungla ID',true);
+ const profileCloudText=cloudState.user&&accessState.status==='active'
+  ?'Profilo collegato al tuo account cloud. Nome e frase vengono sincronizzati tra i dispositivi; la foto verrà sincronizzata nel prossimo step.'
+  :'Profilo locale del dispositivo.';
+ const profileSyncStatus=cloudState.user
+  ?(accessState.status==='active'?'Cloud collegato · sincronizzazione attiva':accessState.status==='pending'?'In attesa di approvazione':'Account sospeso')
+  :'Solo locale';
+ page('<div class="stack"><section class="card hero jungle-hero"><div class="profile-hero">'+avatarHtml('large')+'<div><div class="eyebrow">Identità Sgiungla</div><h1>'+(p.displayName?esc(p.displayName):'Il tuo profilo')+'</h1><p class="subtle">'+esc(profileCloudText)+'</p></div></div></section><section class="card"><h2 class="section-title">Profilo</h2><label>Nome<input id="profileName" maxlength="60" placeholder="Come vuoi essere chiamato" value="'+esc(p.displayName||'')+'"></label><label>Frase Sgiungla<input id="profileMotto" maxlength="120" value="'+esc(p.motto||'La giungla universitaria è sotto controllo.')+'"></label><div class="actions"><button class="btn secondary" data-action="avatar-pick">📷 Cambia foto</button><button class="btn" data-action="save-profile">Salva profilo</button></div><input id="avatarPicker" type="file" accept="image/*" hidden></section><section class="card"><h3 class="section-title">Sincronizzazione</h3><div class="sync-panel"><div><span>Account</span><strong>'+esc(cloudState.user?.email||'—')+'</strong></div><div><span>Dispositivo</span><strong>'+esc(store.sync?.clientId||'—')+'</strong></div><div><span>Stato</span><strong>'+esc(profileSyncStatus)+'</strong></div></div><p class="subtle">Banca e progressi restano separati per account. Un backup desktop importa i dati di studio senza sostituire account, profilo o configurazione cloud.</p></section></div>','Profilo','Sgiungla ID',true);
  setTimeout(()=>{document.getElementById('avatarPicker')?.addEventListener('change',handleAvatar);},0);
 }
 async function handleAvatar(e){
@@ -485,7 +491,48 @@ function updateSearch(){const r=searchMatches(),box=document.getElementById('sea
 
 function normalizeQuestion(raw,source){if(!raw||typeof raw!=='object')return null;const options=(raw.options||[]).map((o,i)=>({letter:norm(o?.letter||['A','B','C','D'][i]).toUpperCase(),optionId:norm(o?.optionId||o?.id||('opt_'+(i+1))),text:norm(o?.text??o)})).filter(o=>/^[A-D]$/.test(o.letter)&&o.text);let correct=norm(raw.correct||raw.correctAnswer).toUpperCase();const coi=norm(raw.correctOptionId||raw.correct_option_id);if(coi){const m=options.find(o=>o.optionId===coi);if(m)correct=m.letter;}const chapter=Number(raw.chapter||raw.chapterNumber||0),text=norm(raw.text||raw.question);if(!raw.id||!chapter||!text||options.length!==4||!/^[A-D]$/.test(correct))return null;return {...raw,id:norm(raw.id),source,chapter,text,options,correct,correctOptionId:coi||options.find(o=>o.letter===correct)?.optionId||'',explanation:norm(raw.explanation||raw.spiegazione),reference:norm(raw.reference||raw.fonte||''),difficulty:['easy','medium','hard'].includes(String(raw.difficulty||'').toLowerCase())?String(raw.difficulty).toLowerCase():'medium'};}
 function mergeById(oldRows,newRows){const m=new Map((oldRows||[]).map(q=>[q.id,q]));for(const q of newRows)m.set(q.id,{...(m.get(q.id)||{}),...q});return [...m.values()];}
-async function importPack(p){if(!p||typeof p!=='object')throw new Error('JSON non valido');if(p.schema===BACKUP_SCHEMA){if(!p.store?.courses)throw new Error('Backup non valido');store=p.store;for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await saveStore(store);return 'Backup ripristinato';}if(p.schema!==BANK_SCHEMA)throw new Error('Serve una Banca QuizLab COMPLETA o un Backup QuizLab.');const id=norm(p.course?.courseId),subject=norm(p.course?.subject||id);if(!id)throw new Error('Manca course.courseId');const off=(p.officialBank||[]).map(q=>normalizeQuestion(q,'official')).filter(Boolean),ai=(p.aiBank||[]).map(q=>normalizeQuestion(q,'ai')).filter(Boolean);if(!off.length&&!ai.length)throw new Error('Nessuna domanda valida');const c=shape(store.courses[id]||emptyCourse(subject));c.subject=subject;c.officialBank=mergeById(c.officialBank,off);c.aiBank=mergeById(c.aiBank,ai);if(p.topicMap)c.topicMap=p.topicMap;if(p.aiWorkflow)c.aiWorkflow={...c.aiWorkflow,...p.aiWorkflow};await saveCourse(id,c,{bankDirty:true});return subject+': '+off.length+' ufficiali · '+ai.length+' AI';}
+async function importPack(p){
+ if(!p||typeof p!=='object')throw new Error('JSON non valido');
+ if(p.schema===BACKUP_SCHEMA){
+  if(!p.store?.courses||typeof p.store.courses!=='object')throw new Error('Backup non valido');
+  const importedEntries=Object.entries(p.store.courses);
+  const importedIds=importedEntries.map(([id])=>id);
+  const nextCourses={...(store.courses||{})};
+  for(const [id,c] of importedEntries)nextCourses[id]=shape(c);
+
+  // Un backup desktop trasferisce solo dati di studio.
+  // Account, profilo, dispositivo e configurazione cloud restano quelli dell'utente attuale.
+  store.courses=nextCourses;
+  store.profile=store.profile||{};
+  store.settings=store.settings||{};
+  store.sync=store.sync||{};
+  store.sync.dirtyCourseIds=uniq([...(store.sync.dirtyCourseIds||[]),...importedIds]);
+  store.sync.dirtyBankCourseIds=uniq([...(store.sync.dirtyBankCourseIds||[]),...importedIds]);
+  store.sync.lastLocalChangeAt=now();
+  if(cloudState.user)store.sync.ownerId=cloudState.user.id;
+  store=await saveStore(store);
+
+  if(cloudState.user&&accessState.status==='active'&&navigator.onLine){
+   await cloudSync({silent:true});
+  }else{
+   scheduleAutoSync();
+  }
+  return 'Backup importato · '+importedIds.length+' materie · progressi preservati';
+ }
+ if(p.schema!==BANK_SCHEMA)throw new Error('Serve una Banca QuizLab COMPLETA o un Backup QuizLab.');
+ const id=norm(p.course?.courseId),subject=norm(p.course?.subject||id);
+ if(!id)throw new Error('Manca course.courseId');
+ const off=(p.officialBank||[]).map(q=>normalizeQuestion(q,'official')).filter(Boolean),ai=(p.aiBank||[]).map(q=>normalizeQuestion(q,'ai')).filter(Boolean);
+ if(!off.length&&!ai.length)throw new Error('Nessuna domanda valida');
+ const c=shape(store.courses[id]||emptyCourse(subject));
+ c.subject=subject;
+ c.officialBank=mergeById(c.officialBank,off);
+ c.aiBank=mergeById(c.aiBank,ai);
+ if(p.topicMap)c.topicMap=p.topicMap;
+ if(p.aiWorkflow)c.aiWorkflow={...c.aiWorkflow,...p.aiWorkflow};
+ await saveCourse(id,c,{bankDirty:true});
+ return subject+': '+off.length+' ufficiali · '+ai.length+' AI';
+}
 function exportCourse(id){const c=course(id);if(!c)return;download(fileName(c.subject)+'_QuizLab_banca_COMPLETA_mobile.json',{schema:BANK_SCHEMA,version:2,exportedAt:now(),course:{courseId:id,subject:c.subject},officialBank:c.officialBank,aiBank:c.aiBank,topicMap:c.topicMap,aiWorkflow:c.aiWorkflow});}
 function backup(){download('QuizLab_Mobile_BACKUP_'+new Date().toISOString().slice(0,10)+'.json',{schema:BACKUP_SCHEMA,version:1,exportedAt:now(),store});}
 
