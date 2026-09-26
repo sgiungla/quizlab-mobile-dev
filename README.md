@@ -10,6 +10,7 @@ Sviluppo separato dalla versione stabile di UniSgiunglaLab.
 - errori, segnate e statistiche locali
 - backup/import locale
 - PWA installabile
-- sincronizzazione cloud: **non ancora attiva**
+- sincronizzazione cloud Supabase attiva con account, approvazione Admin, backup/migrazione, avatar e gestione materie
+- sincronizzazione progressi multi-dispositivo con controllo di revisione e merge anti-conflitto
 
 La versione desktop stabile non viene modificata da questo repository.
