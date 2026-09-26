@@ -173,17 +173,194 @@ export class QuizLabSyncAdapter {
     };
   }
 
-  progressPayload(course={}){
+  maxIso(a,b){
+    if(!a)return b||null;
+    if(!b)return a||null;
+    return String(a)>=String(b)?a:b;
+  }
+
+  eventId(kind,event={}){
+    if(event.eventId)return String(event.eventId);
+    const raw=JSON.stringify([
+      kind,event.at||'',event.questionId||'',event.mode||'',event.answer||'',
+      event.correct??'',event.elapsedMs??'',event.grade??'',event.lode??'',
+      Array.isArray(event.questionIds)?event.questionIds.join(','):'',
+      Array.isArray(event.wrongIds)?event.wrongIds.join(','):''
+    ]);
+    let h1=2166136261,h2=2246822519;
+    for(let i=0;i<raw.length;i++){
+      const c=raw.charCodeAt(i);
+      h1=Math.imul(h1^c,16777619);
+      h2=Math.imul(h2^c,3266489917);
+    }
+    return 'legacy_'+kind+'_'+(h1>>>0).toString(36)+(h2>>>0).toString(36);
+  }
+
+  normalizeStateMap(raw={}){
+    const out={};
+    if(!raw||typeof raw!=='object')return out;
+    for(const [id,state] of Object.entries(raw)){
+      if(!id)continue;
+      if(state&&typeof state==='object'){
+        out[id]={value:Boolean(state.value),at:state.at||null};
+      }
+    }
+    return out;
+  }
+
+  normalizeTimeMap(raw={}){
+    const out={};
+    if(!raw||typeof raw!=='object')return out;
+    for(const [id,at] of Object.entries(raw))if(id&&at)out[id]=String(at);
+    return out;
+  }
+
+  normalizeProgress(progress={}){
+    const p=progress&&typeof progress==='object'?progress:{};
+    const baseAt=p.updatedAt||p.createdAt||'1970-01-01T00:00:00.000Z';
+    const rawMeta=p.syncMeta&&typeof p.syncMeta==='object'?p.syncMeta:{};
+    const meta={
+      version:2,
+      performanceResetAt:rawMeta.performanceResetAt||null,
+      reviewResetAt:rawMeta.reviewResetAt||null,
+      markedState:this.normalizeStateMap(rawMeta.markedState),
+      pendingState:this.normalizeStateMap(rawMeta.pendingState),
+      historicalWrongAt:this.normalizeTimeMap(rawMeta.historicalWrongAt),
+      fullSeenAt:this.normalizeTimeMap(rawMeta.fullSeenAt)
+    };
+
+    const marked=Array.isArray(p.marked)?[...new Set(p.marked.filter(Boolean))]:[];
+    const pendingReview=Array.isArray(p.pendingReview)?[...new Set(p.pendingReview.filter(Boolean))]:[];
+    const historicalWrong=Array.isArray(p.historicalWrong)?[...new Set(p.historicalWrong.filter(Boolean))]:[];
+    const fullCampaign={
+      signature:p.fullCampaign?.signature||'all',
+      seenIds:Array.isArray(p.fullCampaign?.seenIds)?[...new Set(p.fullCampaign.seenIds.filter(Boolean))]:[],
+      resetAt:p.fullCampaign?.resetAt||null
+    };
+
+    for(const id of marked)if(!meta.markedState[id])meta.markedState[id]={value:true,at:baseAt};
+    for(const id of pendingReview)if(!meta.pendingState[id])meta.pendingState[id]={value:true,at:baseAt};
+    for(const id of historicalWrong)if(!meta.historicalWrongAt[id])meta.historicalWrongAt[id]=baseAt;
+    for(const id of fullCampaign.seenIds)if(!meta.fullSeenAt[id])meta.fullSeenAt[id]=baseAt;
+
+    const attempts=(Array.isArray(p.attempts)?p.attempts:[]).map(e=>({...e,eventId:this.eventId('attempt',e)}));
+    const exams=(Array.isArray(p.exams)?p.exams:[]).map(e=>({...e,eventId:this.eventId('exam',e)}));
+
     return {
+      attempts,exams,marked,pendingReview,historicalWrong,fullCampaign,syncMeta:meta,
+      createdAt:p.createdAt||null,updatedAt:p.updatedAt||null
+    };
+  }
+
+  mergeStateMaps(a={},b={}){
+    const out={};
+    for(const [id,state] of [...Object.entries(a||{}),...Object.entries(b||{})]){
+      if(!id||!state)continue;
+      const prev=out[id];
+      if(!prev||String(state.at||'')>=String(prev.at||''))out[id]={value:Boolean(state.value),at:state.at||null};
+    }
+    return out;
+  }
+
+  mergeTimeMaps(a={},b={}){
+    const out={...(a||{})};
+    for(const [id,at] of Object.entries(b||{})){
+      if(!out[id]||String(at)>=String(out[id]))out[id]=at;
+    }
+    return out;
+  }
+
+  mergeEvents(a=[],b=[],kind,resetAt=null){
+    const map=new Map();
+    for(const raw of [...a,...b]){
+      const e={...raw,eventId:this.eventId(kind,raw)};
+      const key=e.eventId;
+      const prev=map.get(key);
+      if(!prev||String(e.at||'')>=String(prev.at||''))map.set(key,e);
+    }
+    return [...map.values()]
+      .filter(e=>!resetAt||!e.at||String(e.at)>=String(resetAt))
+      .sort((x,y)=>String(x.at||'').localeCompare(String(y.at||'')));
+  }
+
+  mergeProgress(localProgress={},remoteProgress={}){
+    const a=this.normalizeProgress(localProgress);
+    const b=this.normalizeProgress(remoteProgress);
+    const performanceResetAt=this.maxIso(a.syncMeta.performanceResetAt,b.syncMeta.performanceResetAt);
+    const reviewResetAt=this.maxIso(a.syncMeta.reviewResetAt,b.syncMeta.reviewResetAt);
+    const attempts=this.mergeEvents(a.attempts,b.attempts,'attempt',performanceResetAt);
+    const exams=this.mergeEvents(a.exams,b.exams,'exam',performanceResetAt);
+    const markedState=this.mergeStateMaps(a.syncMeta.markedState,b.syncMeta.markedState);
+    const pendingState=this.mergeStateMaps(a.syncMeta.pendingState,b.syncMeta.pendingState);
+    const historicalWrongAt=this.mergeTimeMaps(a.syncMeta.historicalWrongAt,b.syncMeta.historicalWrongAt);
+    const fullSeenAt=this.mergeTimeMaps(a.syncMeta.fullSeenAt,b.syncMeta.fullSeenAt);
+
+    for(const e of attempts){
+      if(!e.questionId||!e.at)continue;
+      if(e.correct===false){
+        const prev=pendingState[e.questionId];
+        if(!prev||String(e.at)>=String(prev.at||''))pendingState[e.questionId]={value:true,at:e.at};
+        if(!historicalWrongAt[e.questionId]||String(e.at)>=String(historicalWrongAt[e.questionId]))historicalWrongAt[e.questionId]=e.at;
+      }else if(e.correct===true&&e.mode==='review'){
+        const prev=pendingState[e.questionId];
+        if(!prev||String(e.at)>=String(prev.at||''))pendingState[e.questionId]={value:false,at:e.at};
+      }
+    }
+
+    const marked=Object.entries(markedState)
+      .filter(([,v])=>v.value&&(!reviewResetAt||!v.at||String(v.at)>=String(reviewResetAt)))
+      .map(([id])=>id);
+    const pendingReview=Object.entries(pendingState)
+      .filter(([,v])=>v.value&&(!reviewResetAt||!v.at||String(v.at)>=String(reviewResetAt)))
+      .map(([id])=>id);
+    const historicalWrong=Object.entries(historicalWrongAt)
+      .filter(([,at])=>!reviewResetAt||!at||String(at)>=String(reviewResetAt))
+      .map(([id])=>id);
+
+    const fullResetAt=this.maxIso(a.fullCampaign.resetAt,b.fullCampaign.resetAt);
+    for(const e of attempts){
+      if(e.mode==='full'&&e.questionId&&e.at&&(!fullResetAt||String(e.at)>=String(fullResetAt))){
+        if(!fullSeenAt[e.questionId]||String(e.at)>=String(fullSeenAt[e.questionId]))fullSeenAt[e.questionId]=e.at;
+      }
+    }
+    const seenIds=Object.entries(fullSeenAt)
+      .filter(([,at])=>!fullResetAt||!at||String(at)>=String(fullResetAt))
+      .map(([id])=>id);
+
+    return {
+      attempts,exams,marked,pendingReview,historicalWrong,
+      fullCampaign:{signature:'all',seenIds,resetAt:fullResetAt},
+      syncMeta:{version:2,performanceResetAt,reviewResetAt,markedState,pendingState,historicalWrongAt,fullSeenAt},
+      createdAt:a.createdAt&&b.createdAt?(String(a.createdAt)<=String(b.createdAt)?a.createdAt:b.createdAt):(a.createdAt||b.createdAt||null),
+      updatedAt:new Date().toISOString()
+    };
+  }
+
+  progressPayload(course={}){
+    return this.normalizeProgress({
       attempts:Array.isArray(course.attempts)?course.attempts:[],
       exams:Array.isArray(course.exams)?course.exams:[],
       marked:Array.isArray(course.marked)?course.marked:[],
       pendingReview:Array.isArray(course.pendingReview)?course.pendingReview:[],
       historicalWrong:Array.isArray(course.historicalWrong)?course.historicalWrong:[],
       fullCampaign:course.fullCampaign||{signature:'all',seenIds:[],resetAt:null},
+      syncMeta:course.syncMeta||{},
       createdAt:course.createdAt||null,
       updatedAt:course.updatedAt||null
-    };
+    });
+  }
+
+  async saveProgressAtomic(bankId,expectedRevision,progress){
+    const {data,error}=await this.client.rpc('quizlab_save_progress_v2',{
+      target_bank_id:bankId,
+      expected_revision:Number(expectedRevision||0),
+      incoming_progress:progress
+    });
+    if(error){
+      if(error.code==='42883')return {legacy:true};
+      throw error;
+    }
+    return data||{};
   }
 
   async pushCourse(courseId,course={},options={}){
@@ -220,24 +397,53 @@ export class QuizLabSyncAdapter {
 
     const {data:existing,error:revError}=await this.client
       .from('quizlab_user_courses')
-      .select('revision')
+      .select('revision,progress_json')
       .eq('user_id',user.id)
       .eq('bank_id',bank.id)
       .maybeSingle();
     if(revError) throw revError;
-    const revision=Number(existing?.revision||0)+1;
 
-    const {error:progressError}=await this.client
-      .from('quizlab_user_courses')
-      .upsert({
-        user_id:user.id,
-        bank_id:bank.id,
-        progress_json:this.progressPayload(course),
-        revision,
-        updated_at:now
-      },{onConflict:'user_id,bank_id'});
-    if(progressError) throw progressError;
-    return {courseId,bankId:bank.id,revision};
+    let expectedRevision=Number(existing?.revision||0);
+    let progress=this.progressPayload(course);
+
+    for(let attempt=0;attempt<5;attempt++){
+      const out=await this.saveProgressAtomic(bank.id,expectedRevision,progress);
+
+      if(out.legacy){
+        const revision=expectedRevision+1;
+        const {error:progressError}=await this.client
+          .from('quizlab_user_courses')
+          .upsert({
+            user_id:user.id,
+            bank_id:bank.id,
+            progress_json:progress,
+            revision,
+            updated_at:now
+          },{onConflict:'user_id,bank_id'});
+        if(progressError) throw progressError;
+        return {courseId,bankId:bank.id,revision,progress,legacy:true};
+      }
+
+      if(out.ok){
+        return {
+          courseId,
+          bankId:bank.id,
+          revision:Number(out.revision||expectedRevision+1),
+          progress:this.normalizeProgress(out.progress||progress),
+          merged:attempt>0
+        };
+      }
+
+      if(out.conflict){
+        expectedRevision=Number(out.revision||0);
+        progress=this.mergeProgress(progress,out.progress||{});
+        continue;
+      }
+
+      throw new Error('Risposta cloud non valida durante la sincronizzazione');
+    }
+
+    throw new Error('Conflitto di sincronizzazione persistente: riprova');
   }
 
   async deleteCloudCourse(courseId){
@@ -368,6 +574,15 @@ export class QuizLabSyncAdapter {
     const pull=await this.pullChanges(payload);
     if(Array.isArray(pull.courses)){
       pull.courses=pull.courses.filter(course=>!retired.has(course.courseId)&&!dirtyIds.has(course.courseId));
+      const pushedCourses=(push.items||[]).filter(x=>x?.progress).map(x=>({
+        courseId:x.courseId,
+        subject:safePayload.courses?.[x.courseId]?.subject||x.courseId,
+        bank:{},
+        progress:x.progress,
+        revision:Number(x.revision||0),
+        updatedAt:x.progress?.updatedAt||null
+      }));
+      pull.courses=[...pull.courses,...pushedCourses];
       pull.pulled=pull.courses.length;
     }
     return {status:this.status,push,pull,blockedCourseIds};
