@@ -283,7 +283,10 @@ export class QuizLabSyncAdapter {
       if(!prev||String(e.at||'')>=String(prev.at||''))map.set(key,e);
     }
     return [...map.values()]
-      .filter(e=>!resetAt||!e.at||String(e.at)>=String(resetAt))
+      // Once a performance reset exists, an undated legacy event must be treated
+      // as pre-reset. New QuizLab events always carry `at`, so allowing !e.at
+      // here would let old imported/stale attempts resurrect after a reset.
+      .filter(e=>!resetAt||(e.at&&String(e.at)>=String(resetAt)))
       .sort((x,y)=>String(x.at||'').localeCompare(String(y.at||'')));
   }
 
