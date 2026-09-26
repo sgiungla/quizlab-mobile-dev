@@ -281,6 +281,20 @@ export class QuizLabSyncAdapter {
     return data||{};
   }
 
+  async adminRetiredCourses(){
+    this.requireUser();
+    const {data,error}=await this.client.rpc('quizlab_admin_retired_courses');
+    if(error) throw error;
+    return data||[];
+  }
+
+  async adminRestoreCourse(courseId){
+    this.requireUser();
+    const {data,error}=await this.client.rpc('quizlab_admin_restore_course',{target_course_id:courseId});
+    if(error) throw error;
+    return Boolean(data);
+  }
+
   async touchDevice(clientId,{push=false,pull=false}={}){
     const user=this.requireUser();
     if(!clientId) return;
