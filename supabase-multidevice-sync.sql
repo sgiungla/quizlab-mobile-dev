@@ -108,3 +108,8 @@ $$;
 
 revoke all on function public.quizlab_save_progress_v2(uuid,bigint,jsonb) from public;
 grant execute on function public.quizlab_save_progress_v2(uuid,bigint,jsonb) to authenticated;
+
+-- From v0.7 onward progress writes must pass through the atomic RPC above.
+-- Old/stale clients may still read, but they cannot overwrite a newer revision directly.
+revoke insert, update, delete on table public.quizlab_user_courses from authenticated;
+grant select on table public.quizlab_user_courses to authenticated;
