@@ -55,8 +55,12 @@ export class QuizLabSyncAdapter {
 
   async signOut(){
     if(!this.client) return;
-    const {error}=await this.client.auth.signOut();
+    // Device-local logout: remove only this browser/PWA session.
+    // Other devices using the same QuizLab account remain signed in.
+    const {error}=await this.client.auth.signOut({scope:'local'});
     if(error) throw error;
+    this.session=null;
+    this.status='cloud-ready';
   }
 
   async upsertProfile(profile={}){
