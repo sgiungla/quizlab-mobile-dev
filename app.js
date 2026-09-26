@@ -388,18 +388,22 @@ function applyConfirmedPushProgress(items=[]){
  for(const item of items||[]){
   if(!item?.courseId||!item?.progress||!store.courses[item.courseId])continue;
   const local=shape(store.courses[item.courseId]);
-  const merged=sync.mergeProgress(sync.progressPayload(local),item.progress);
+  // item.progress is already the exact state accepted by the atomic cloud write.
+  // In a conflict it already contains the resolved merge. Re-merging it with
+  // the pre-push local snapshot can resurrect state intentionally cleared by a
+  // reset (marked/review/history), so the confirmed server state must win here.
+  const confirmed=sync.normalizeProgress(item.progress);
   store.courses[item.courseId]=shape({
    ...local,
-   attempts:merged.attempts,
-   exams:merged.exams,
-   marked:merged.marked,
-   pendingReview:merged.pendingReview,
-   historicalWrong:merged.historicalWrong,
-   fullCampaign:merged.fullCampaign,
-   syncMeta:merged.syncMeta,
+   attempts:confirmed.attempts,
+   exams:confirmed.exams,
+   marked:confirmed.marked,
+   pendingReview:confirmed.pendingReview,
+   historicalWrong:confirmed.historicalWrong,
+   fullCampaign:confirmed.fullCampaign,
+   syncMeta:confirmed.syncMeta,
    cloudRevision:Number(item.revision||local.cloudRevision||0),
-   updatedAt:merged.updatedAt||local.updatedAt
+   updatedAt:confirmed.updatedAt||local.updatedAt
   });
  }
 }
