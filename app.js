@@ -23,6 +23,7 @@ let lastSyncError=false;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const norm=s=>String(s??'').replace(/\s+/g,' ').trim();
 const now=()=>new Date().toISOString();
+const newEventId=()=>{try{return crypto.randomUUID();}catch(e){return 'evt_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);}};
 const uniq=a=>[...new Set((a||[]).filter(Boolean))];
 const shuffle=a=>{const x=[...a];for(let i=x.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[x[i],x[j]]=[x[j],x[i]];}return x;};
 const qbank=c=>[...(c?.officialBank||[]),...(c?.aiBank||[])];
@@ -74,7 +75,25 @@ function refreshSyncBadge(){
 }
 
 
-function emptyCourse(subject=''){return {subject:norm(subject),officialBank:[],aiBank:[],topicMap:null,aiWorkflow:{},attempts:[],exams:[],marked:[],pendingReview:[],historicalWrong:[],fullCampaign:{signature:'all',seenIds:[],resetAt:null},createdAt:now(),updatedAt:now()};}
+function emptyCourse(subject=''){return {subject:norm(subject),officialBank:[],aiBank:[],topicMap:null,aiWorkflow:{},attempts:[],exams:[],marked:[],pendingReview:[],historicalWrong:[],fullCampaign:{signature:'all',seenIds:[],resetAt:null},syncMeta:{version:2,performanceResetAt:null,reviewResetAt:null,markedState:{},pendingState:{},historicalWrongAt:{},fullSeenAt:{}},createdAt:now(),updatedAt:now()};}
+function ensureCourseSyncMeta(c){
+ const baseAt=c.updatedAt||c.createdAt||'1970-01-01T00:00:00.000Z';
+ const raw=c.syncMeta&&typeof c.syncMeta==='object'?c.syncMeta:{};
+ c.syncMeta={
+  version:2,
+  performanceResetAt:raw.performanceResetAt||null,
+  reviewResetAt:raw.reviewResetAt||null,
+  markedState:raw.markedState&&typeof raw.markedState==='object'?{...raw.markedState}:{},
+  pendingState:raw.pendingState&&typeof raw.pendingState==='object'?{...raw.pendingState}:{},
+  historicalWrongAt:raw.historicalWrongAt&&typeof raw.historicalWrongAt==='object'?{...raw.historicalWrongAt}:{},
+  fullSeenAt:raw.fullSeenAt&&typeof raw.fullSeenAt==='object'?{...raw.fullSeenAt}:{}
+ };
+ for(const id of c.marked||[])if(!c.syncMeta.markedState[id])c.syncMeta.markedState[id]={value:true,at:baseAt};
+ for(const id of c.pendingReview||[])if(!c.syncMeta.pendingState[id])c.syncMeta.pendingState[id]={value:true,at:baseAt};
+ for(const id of c.historicalWrong||[])if(!c.syncMeta.historicalWrongAt[id])c.syncMeta.historicalWrongAt[id]=baseAt;
+ for(const id of c.fullCampaign?.seenIds||[])if(!c.syncMeta.fullSeenAt[id])c.syncMeta.fullSeenAt[id]=baseAt;
+ return c.syncMeta;
+}
 function shape(c){
  const x={...emptyCourse(c?.subject||''),...(c||{})};
  for(const k of ['officialBank','aiBank','attempts','exams','marked','pendingReview','historicalWrong'])if(!Array.isArray(x[k]))x[k]=[];
@@ -85,6 +104,7 @@ function shape(c){
  const legacyFull=x.attempts.filter(a=>a?.mode==='full'&&(!resetAt||String(a.at)>=String(resetAt))).map(a=>a.questionId);
  x.fullCampaign.seenIds=uniq([...x.fullCampaign.seenIds,...legacyFull]);
  x.marked=uniq(x.marked);x.pendingReview=uniq(x.pendingReview);x.historicalWrong=uniq(x.historicalWrong);
+ ensureCourseSyncMeta(x);
  return x;
 }
 function course(id=route.courseId){return id&&store.courses[id]?shape(store.courses[id]):null;}
@@ -195,7 +215,9 @@ async function resetCycle(){
  const ok=confirm('Ricominciare il ciclo “Materia completa”?\n\nVerrà azzerato solo quel percorso. Performance e ripasso resteranno invariati.');
  if(!ok)return;
  const fromTraining=route.name==='training';
- c.fullCampaign={signature:'all',seenIds:[],resetAt:now()};
+ const at=now(),meta=ensureCourseSyncMeta(c);
+ c.fullCampaign={signature:'all',seenIds:[],resetAt:at};
+ meta.fullSeenAt={};
  await saveCourse(route.courseId,c);
  await cloudSync({silent:true});
  toast('Ciclo materia ricominciato 🌱');
@@ -207,6 +229,8 @@ async function resetPerformance(){
  if(!ok)return;
  const really=confirm('Conferma definitiva: il reset verrà sincronizzato anche nel cloud.');
  if(!really)return;
+ const meta=ensureCourseSyncMeta(c);
+ meta.performanceResetAt=now();
  c.attempts=[];
  c.exams=[];
  await saveCourse(route.courseId,c);
@@ -218,6 +242,11 @@ async function resetReview(){
  const c=course();if(!c)return;
  const ok=confirm('Azzero il ripasso di questa materia?\n\nVerranno cancellati storico errori, coda recupero e domande segnate.\nPerformance e percorso “Materia completa” resteranno invariati.');
  if(!ok)return;
+ const meta=ensureCourseSyncMeta(c);
+ meta.reviewResetAt=now();
+ meta.markedState={};
+ meta.pendingState={};
+ meta.historicalWrongAt={};
  c.pendingReview=[];
  c.historicalWrong=[];
  c.marked=[];
@@ -252,14 +281,20 @@ async function confirmAnswer(){
  if(session.mode==='exam'||session.mode==='study')return;
  const c=course(),q=current(),a=session.answers[q.id];if(!a?.selected)return;
  const correct=a.selected===q.correct;a.confirmed=true;a.correct=correct;a.at=now();
- const elapsedMs=Date.now()-session.questionShownAt;
- c.attempts.push({questionId:q.id,chapter:q.chapter,source:q.source,difficulty:q.difficulty,correct,answer:a.selected,at:a.at,elapsedMs,mode:session.mode});
+ const elapsedMs=Date.now()-session.questionShownAt,meta=ensureCourseSyncMeta(c);
+ c.attempts.push({eventId:newEventId(),questionId:q.id,chapter:q.chapter,source:q.source,difficulty:q.difficulty,correct,answer:a.selected,at:a.at,elapsedMs,mode:session.mode});
  if(session.mode==='full'){
    c.fullCampaign=c.fullCampaign||{signature:'all',seenIds:[],resetAt:null};
    c.fullCampaign.seenIds=uniq([...(c.fullCampaign.seenIds||[]),q.id]);
+   meta.fullSeenAt[q.id]=a.at;
  }
- if(!correct){c.pendingReview=uniq([...c.pendingReview,q.id]);c.historicalWrong=uniq([...c.historicalWrong,q.id]);}
- else if(session.mode==='review'){c.pendingReview=c.pendingReview.filter(id=>id!==q.id);}
+ if(!correct){
+  c.pendingReview=uniq([...c.pendingReview,q.id]);c.historicalWrong=uniq([...c.historicalWrong,q.id]);
+  meta.pendingState[q.id]={value:true,at:a.at};meta.historicalWrongAt[q.id]=a.at;
+ }else if(session.mode==='review'){
+  c.pendingReview=c.pendingReview.filter(id=>id!==q.id);
+  meta.pendingState[q.id]={value:false,at:a.at};
+ }
  await saveCourse(route.courseId,c);render();
 }
 async function nextQuestion(){if(session.index<session.questions.length-1){session.index++;session.questionShownAt=Date.now();render();}else{await cloudSync({silent:true});route.name='results';render();}}
@@ -267,9 +302,12 @@ async function confirmExamAnswer(){
  if(!session||session.mode!=='exam')return;
  const c=course(),q=current(),a=session.answers[q.id];if(!a?.selected||a.confirmed)return;
  const correct=a.selected===q.correct;a.confirmed=true;a.correct=correct;a.at=now();
- const elapsedMs=Date.now()-session.questionShownAt;
- c.attempts.push({questionId:q.id,chapter:q.chapter,source:q.source,difficulty:q.difficulty,correct,answer:a.selected,at:a.at,elapsedMs,mode:'exam',isLode:session.index===30});
- if(!correct){c.pendingReview=uniq([...c.pendingReview,q.id]);c.historicalWrong=uniq([...c.historicalWrong,q.id]);}
+ const elapsedMs=Date.now()-session.questionShownAt,meta=ensureCourseSyncMeta(c);
+ c.attempts.push({eventId:newEventId(),questionId:q.id,chapter:q.chapter,source:q.source,difficulty:q.difficulty,correct,answer:a.selected,at:a.at,elapsedMs,mode:'exam',isLode:session.index===30});
+ if(!correct){
+  c.pendingReview=uniq([...c.pendingReview,q.id]);c.historicalWrong=uniq([...c.historicalWrong,q.id]);
+  meta.pendingState[q.id]={value:true,at:a.at};meta.historicalWrongAt[q.id]=a.at;
+ }
  await saveCourse(route.courseId,c);
 }
 async function finishExam(timeout=false){
@@ -278,7 +316,7 @@ async function finishExam(timeout=false){
  const c=course();let correct=0,lodeCorrect=false;const wrong=[];
  session.questions.forEach((q,i)=>{const a=session.answers[q.id],ok=!!a?.selected&&a.selected===q.correct,isLode=i===30;if(!isLode&&ok)correct++;if(isLode)lodeCorrect=ok;if(!ok)wrong.push(q.id);});
  const grade=correct,lode=correct===30&&lodeCorrect,elapsedMs=Date.now()-session.startedAt;
- c.exams.push({at:now(),grade,lode,correct30:correct,lodeCorrect,elapsedMs,timeout,wrongIds:wrong,questionIds:session.questions.map(q=>q.id),answeredCount:Object.values(session.answers).filter(a=>a?.selected).length});
+ c.exams.push({eventId:newEventId(),at:now(),grade,lode,correct30:correct,lodeCorrect,elapsedMs,timeout,wrongIds:wrong,questionIds:session.questions.map(q=>q.id),answeredCount:Object.values(session.answers).filter(a=>a?.selected).length});
  await saveCourse(route.courseId,c);session.examResult={grade,lode,correct,elapsedMs,wrong};await cloudSync({silent:true});route.name='results';render();
 }
 function results(){if(session?.mode==='exam'){const r=session.examResult;if(!r)return;page('<section class="card hero"><div class="eyebrow">🎓 Esito simulazione</div><h1>'+(r.lode?'30 e lode':r.grade+'/30')+'</h1><p>'+r.correct+'/30 corrette · '+fmtDuration(r.elapsedMs)+'</p><div class="actions"><button class="btn" data-action="dashboard">Dashboard</button><button class="btn secondary" data-action="retry-wrong">Ripassa gli errori</button></div></section>',course().subject,'Risultati',true);return;}const done=Object.entries(session.answers).filter(([,a])=>a.confirmed),ok=done.filter(([,a])=>a.correct).length,total=done.length;page('<section class="card hero"><div class="eyebrow">Sessione completata</div><h1>'+fmtGrade(gradeFromRatio(ok,total))+'</h1><p>'+ok+' / '+total+' · '+pct(total?ok/total:0)+' corrette</p><div class="actions"><button class="btn" data-action="dashboard">Torna alla materia</button><button class="btn secondary" data-action="retry-wrong">Ripassa gli errori</button></div></section>',course().subject,'Risultati',true);}
@@ -365,6 +403,7 @@ function mergeRemoteCourses(rows=[]){
     pendingReview:Array.isArray(progress.pendingReview)?progress.pendingReview:local.pendingReview,
     historicalWrong:Array.isArray(progress.historicalWrong)?progress.historicalWrong:local.historicalWrong,
     fullCampaign:progress.fullCampaign||local.fullCampaign,
+    syncMeta:progress.syncMeta||local.syncMeta,
     createdAt:progress.createdAt||bank.createdAt||local.createdAt,
     updatedAt:progress.updatedAt||bank.updatedAt||remote.updatedAt||local.updatedAt
   });
@@ -815,7 +854,7 @@ if(a==='exam-next'){
  return;
 }
 if(a==='study-prev'){if(session.index>0){session.index--;render();}return;}if(a==='study-next'){if(session.index>=session.questions.length-1){await cloudSync({silent:true});setRoute('dashboard');}else{session.index++;render();}return;}
-if(a==='mark'){const c=course(),q=current(),set=new Set(c.marked);set.has(q.id)?set.delete(q.id):set.add(q.id);c.marked=[...set];await saveCourse(route.courseId,c);render();return;}
+if(a==='mark'){const c=course(),q=current(),set=new Set(c.marked),meta=ensureCourseSyncMeta(c),at=now();if(set.has(q.id)){set.delete(q.id);meta.markedState[q.id]={value:false,at};}else{set.add(q.id);meta.markedState[q.id]={value:true,at};}c.marked=[...set];await saveCourse(route.courseId,c);render();return;}
 if(a==='dashboard'){setRoute('dashboard');return;}
 if(a==='retry-wrong'){const c=course(),by=new Map(qbank(c).map(q=>[q.id,q])),ids=session.mode==='exam'?(session.examResult?.wrong||[]):Object.entries(session.answers).filter(([,v])=>v.confirmed&&!v.correct).map(([id])=>id),qs=ids.map(id=>by.get(id)).filter(Boolean);startSession(qs,'Errori sessione','review');return;}
 if(a==='open-question'){const q=qbank(course()).find(x=>x.id===b.dataset.qid);if(q)startSession([q],'Domanda','study');return;}
