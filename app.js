@@ -644,6 +644,12 @@ async function importPack(p){
      continue;
     }
    }
+   if(cloudState.user&&accessState.status==='active'){
+    try{await sync.restoreMyCourse(id);}catch(e){
+     if(String(e?.message||e).toLowerCase().includes('retired')){skippedIds.push(id);continue;}
+     throw e;
+    }
+   }
    nextCourses[id]=incoming;
    importedIds.push(id);
   }
@@ -674,6 +680,7 @@ async function importPack(p){
  if(!id)throw new Error('Manca course.courseId');
  const off=(p.officialBank||[]).map(q=>normalizeQuestion(q,'official')).filter(Boolean),ai=(p.aiBank||[]).map(q=>normalizeQuestion(q,'ai')).filter(Boolean);
  if(!off.length&&!ai.length)throw new Error('Nessuna domanda valida');
+ if(cloudState.user&&accessState.status==='active')await sync.restoreMyCourse(id);
  const c=shape(store.courses[id]||emptyCourse(subject));
  c.subject=subject;
  c.officialBank=mergeById(c.officialBank,off);
