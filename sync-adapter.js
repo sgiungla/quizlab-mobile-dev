@@ -403,8 +403,18 @@ export class QuizLabSyncAdapter {
       .maybeSingle();
     if(revError) throw revError;
 
-    let expectedRevision=Number(existing?.revision||0);
+    // IMPORTANT: use the revision last seen by THIS device.
+    // Reading the newest revision and then writing against it would let a stale
+    // device overwrite changes made elsewhere without ever producing a conflict.
+    const hasKnownRevision=course.cloudRevision!==undefined&&course.cloudRevision!==null;
+    let expectedRevision=hasKnownRevision?Number(course.cloudRevision||0):Number(existing?.revision||0);
     let progress=this.progressPayload(course);
+
+    // One-time migration for courses created before v0.7, which have no local
+    // cloudRevision yet: merge the current cloud snapshot before the first write.
+    if(!hasKnownRevision&&existing?.progress_json){
+      progress=this.mergeProgress(progress,existing.progress_json);
+    }
 
     for(let attempt=0;attempt<5;attempt++){
       const out=await this.saveProgressAtomic(bank.id,expectedRevision,progress);
