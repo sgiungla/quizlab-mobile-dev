@@ -241,15 +241,27 @@ export class QuizLabSyncAdapter {
   }
 
   async deleteCloudCourse(courseId){
-    const user=this.requireUser();
-    const {data,error}=await this.client
-      .from('quizlab_banks')
-      .delete()
-      .eq('owner_id',user.id)
-      .eq('course_id',courseId)
-      .select('id');
+    this.requireUser();
+    const {data,error}=await this.client.rpc('quizlab_delete_my_course',{target_course_id:courseId});
     if(error) throw error;
-    return {courseId,deleted:(data||[]).length};
+    return data||{course_id:courseId,deleted_banks:0};
+  }
+
+  async restoreMyCourse(courseId){
+    this.requireUser();
+    const {data,error}=await this.client.rpc('quizlab_restore_my_course',{target_course_id:courseId});
+    if(error) throw error;
+    return Boolean(data);
+  }
+
+  async blockedCourseIds(){
+    this.requireUser();
+    const {data,error}=await this.client.rpc('quizlab_blocked_course_ids');
+    if(error){
+      if(error.code==='42883') return [];
+      throw error;
+    }
+    return (data||[]).map(x=>typeof x==='string'?x:x?.course_id).filter(Boolean);
   }
 
   async retiredCourseIds(){
@@ -330,8 +342,8 @@ export class QuizLabSyncAdapter {
   }
 
   async syncNow(payload={}){
-    const retiredCourseIds=await this.retiredCourseIds();
-    const retired=new Set(retiredCourseIds);
+    const blockedCourseIds=await this.blockedCourseIds();
+    const retired=new Set(blockedCourseIds);
     const safePayload={
       ...payload,
       dirtyCourseIds:[...(payload.dirtyCourseIds||[])].filter(id=>!retired.has(id)),
@@ -344,6 +356,6 @@ export class QuizLabSyncAdapter {
       pull.courses=pull.courses.filter(course=>!retired.has(course.courseId)&&!dirtyIds.has(course.courseId));
       pull.pulled=pull.courses.length;
     }
-    return {status:this.status,push,pull,retiredCourseIds};
+    return {status:this.status,push,pull,blockedCourseIds};
   }
 }
