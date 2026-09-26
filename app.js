@@ -404,6 +404,7 @@ function mergeRemoteCourses(rows=[]){
     historicalWrong:Array.isArray(progress.historicalWrong)?progress.historicalWrong:local.historicalWrong,
     fullCampaign:progress.fullCampaign||local.fullCampaign,
     syncMeta:progress.syncMeta||local.syncMeta,
+    cloudRevision:Number(remote.revision||local.cloudRevision||0),
     createdAt:progress.createdAt||bank.createdAt||local.createdAt,
     updatedAt:progress.updatedAt||bank.updatedAt||remote.updatedAt||local.updatedAt
   });
@@ -448,6 +449,11 @@ async function cloudSync({silent=true}={}){
    store.sync.dirtyBankCourseIds=(store.sync?.dirtyBankCourseIds||[]).filter(id=>!blockedIds.includes(id));
    store.sync.hiddenCourseIds=uniq([...(store.sync?.hiddenCourseIds||[]),...blockedIds]);
    if(route.courseId&&blockedIds.includes(route.courseId)){route={name:'home',courseId:null};session=null;}
+  }
+  for(const item of result.push?.items||[]){
+   if(item?.courseId&&store.courses[item.courseId]){
+    store.courses[item.courseId].cloudRevision=Number(item.revision||store.courses[item.courseId].cloudRevision||0);
+   }
   }
   changedDuringSync=(store.sync?.lastLocalChangeAt||null)!==changeToken;
   if(!changedDuringSync){
