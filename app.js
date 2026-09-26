@@ -14,7 +14,7 @@ let toastTimer=null;
 let examTimer=null;
 let cloudState={status:'local-only',user:null};
 let accessState={status:'active',isAdmin:false,legacy:true};
-let adminData={users:[],storage:null,courses:[],loaded:false};
+let adminData={users:[],storage:null,courses:[],retiredCourses:[],loaded:false};
 let adminPendingCount=0;
 let autoSyncTimer=null;
 let syncInFlight=false;
@@ -502,8 +502,8 @@ function accessPage(){
 }
 async function refreshAdminData(){
  if(!accessState.isAdmin)return;
- const [users,storage,courses]=await Promise.all([sync.adminUserOverview(),sync.adminStorageOverview(),sync.adminUserCourseStats()]);
- adminData={users,storage,courses,loaded:true};
+ const [users,storage,courses,retiredCourses]=await Promise.all([sync.adminUserOverview(),sync.adminStorageOverview(),sync.adminUserCourseStats(),sync.adminRetiredCourses()]);
+ adminData={users,storage,courses,retiredCourses,loaded:true};
  adminPendingCount=users.filter(u=>u.account_status==='pending').length;
 }
 async function refreshAdminPending(){
@@ -516,7 +516,7 @@ async function refreshAdminPending(){
 }
 function adminPage(){
  if(!accessState.isAdmin)return setRoute('home',null);
- const users=adminData.users||[],storage=adminData.storage||{},courses=adminData.courses||[];
+ const users=adminData.users||[],storage=adminData.storage||{},courses=adminData.courses||[],retiredCourses=adminData.retiredCourses||[];
  const pending=users.filter(u=>u.account_status==='pending').length;
  const active=users.filter(u=>u.account_status==='active').length;
  const suspended=users.filter(u=>u.account_status==='suspended').length;
@@ -537,7 +537,10 @@ function adminPage(){
  const globalCourseRows=[...globalCourses.values()].sort((a,b)=>String(a.subject).localeCompare(String(b.subject))).map(g=>
   '<div class="admin-user"><div><strong>'+esc(g.subject)+'</strong><div class="result-meta">'+g.users.size+' utenti · '+g.attempts+' tentativi · '+g.exams+' esami</div><div class="result-meta">Course ID: '+esc(g.courseId)+'</div></div><div class="actions"><button class="btn danger-btn compact-btn" data-action="admin-retire-course" data-course="'+esc(g.courseId)+'" data-subject="'+esc(g.subject)+'">Elimina per tutti</button></div></div>'
  ).join('');
-  const rows=users.map(u=>{
+  const retiredRows=[...retiredCourses].map(r=>
+  '<div class="admin-user"><div><strong>'+esc(r.subject||r.course_id)+'</strong><div class="result-meta">Course ID: '+esc(r.course_id)+'</div><div class="result-meta">Ritirata: '+esc(r.retired_at?new Date(r.retired_at).toLocaleString('it-IT'):'—')+'</div></div><div class="actions"><button class="btn secondary compact-btn" data-action="admin-restore-course" data-course="'+esc(r.course_id)+'" data-subject="'+esc(r.subject||r.course_id)+'">Riabilita importazione</button></div></div>'
+ ).join('');
+ const rows=users.map(u=>{
    const st=u.account_status||'pending';
    const self=cloudState.user?.id===u.user_id;
    const statusLabel=st==='active'?'Attivo':st==='suspended'?'Sospeso':'In attesa';
@@ -556,7 +559,7 @@ function adminPage(){
        :'<button class="btn secondary compact-btn" data-action="admin-status" data-user="'+esc(u.user_id)+'" data-status="active">Riattiva</button>';
    return '<div class="admin-user"><div><strong>'+esc(u.email||u.user_id)+'</strong><div class="result-meta">'+statusLabel+' · '+Number(u.course_count||0)+' materie · '+Number(u.attempt_count||0)+' tentativi · '+Number(u.exam_count||0)+' esami'+(accuracy==null?'':' · rendimento viste '+String(accuracy).replace('.',',')+'%')+'</div><div class="result-meta">Ultimo accesso: '+esc(u.last_sign_in_at?new Date(u.last_sign_in_at).toLocaleString('it-IT'):'—')+'</div>'+(courseDetails?'<details class="admin-details"><summary>Statistiche dettagliate ▾</summary><div class="admin-course-list">'+courseDetails+'</div></details>':'')+'</div><div class="actions">'+actions+'</div></div>';
  }).join('');
- page('<div class="stack"><section class="card hero jungle-hero"><div class="eyebrow">Amministrazione</div><h1>Cabina di controllo 🌴</h1><div class="stats"><div class="stat"><span>In attesa</span><strong>'+pending+'</strong></div><div class="stat"><span>Attivi</span><strong>'+active+'</strong></div><div class="stat"><span>Sospesi</span><strong>'+suspended+'</strong></div><div class="stat"><span>Utenti</span><strong>'+users.length+'</strong></div></div></section><section class="card"><div class="section-head"><div><div class="eyebrow">Cloud</div><h3 class="section-title">Spazio occupato</h3></div><button class="btn ghost compact-btn" data-action="admin-refresh">Aggiorna</button></div><div class="stats"><div class="stat"><span>Database</span><strong>'+fmtBytes(storage.database_bytes)+'</strong></div><div class="stat"><span>Banche JSON</span><strong>'+fmtBytes(storage.banks_json_bytes)+'</strong></div><div class="stat"><span>Progressi JSON</span><strong>'+fmtBytes(storage.progress_json_bytes)+'</strong></div><div class="stat"><span>Tabelle QuizLab</span><strong>'+fmtBytes((Number(storage.banks_table_bytes)||0)+(Number(storage.progress_table_bytes)||0))+'</strong></div></div></section><section class="card danger-zone"><div class="section-head"><div><div class="eyebrow">Materie cloud</div><h3 class="section-title">Pulizia globale</h3></div></div><p class="subtle">Solo amministratore. “Elimina per tutti” cancella tutte le copie cloud della materia e i relativi progressi. I dispositivi collegati la rimuoveranno al prossimo sync e non potranno ricrearla automaticamente da copie obsolete.</p><div class="admin-list">'+(globalCourseRows||'<div class="empty">Nessuna materia nel cloud.</div>')+'</div></section><section class="card"><div class="section-head"><div><div class="eyebrow">Utenti</div><h3 class="section-title">Approvazioni, accessi e statistiche</h3></div></div><div class="admin-list">'+(rows||'<div class="empty">Nessun utente.</div>')+'</div></section></div>','Admin','Controllo accessi e cloud',true);
+ page('<div class="stack"><section class="card hero jungle-hero"><div class="eyebrow">Amministrazione</div><h1>Cabina di controllo 🌴</h1><div class="stats"><div class="stat"><span>In attesa</span><strong>'+pending+'</strong></div><div class="stat"><span>Attivi</span><strong>'+active+'</strong></div><div class="stat"><span>Sospesi</span><strong>'+suspended+'</strong></div><div class="stat"><span>Utenti</span><strong>'+users.length+'</strong></div></div></section><section class="card"><div class="section-head"><div><div class="eyebrow">Cloud</div><h3 class="section-title">Spazio occupato</h3></div><button class="btn ghost compact-btn" data-action="admin-refresh">Aggiorna</button></div><div class="stats"><div class="stat"><span>Database</span><strong>'+fmtBytes(storage.database_bytes)+'</strong></div><div class="stat"><span>Banche JSON</span><strong>'+fmtBytes(storage.banks_json_bytes)+'</strong></div><div class="stat"><span>Progressi JSON</span><strong>'+fmtBytes(storage.progress_json_bytes)+'</strong></div><div class="stat"><span>Tabelle QuizLab</span><strong>'+fmtBytes((Number(storage.banks_table_bytes)||0)+(Number(storage.progress_table_bytes)||0))+'</strong></div></div></section><section class="card danger-zone"><div class="section-head"><div><div class="eyebrow">Materie cloud</div><h3 class="section-title">Pulizia globale</h3></div></div><p class="subtle">Solo amministratore. “Elimina per tutti” cancella tutte le copie cloud della materia e i relativi progressi. I dispositivi collegati la rimuoveranno al prossimo sync e non potranno ricrearla automaticamente da copie obsolete.</p><div class="admin-list">'+(globalCourseRows||'<div class="empty">Nessuna materia nel cloud.</div>')+'</div></section><section class="card"><div class="section-head"><div><div class="eyebrow">Recupero Admin</div><h3 class="section-title">Materie ritirate</h3></div></div><p class="subtle">Riabilitare una materia rimuove il blocco globale. I dati eliminati non vengono ricreati: per recuperarli serve un backup/import.</p><div class="admin-list">'+(retiredRows||'<div class="empty">Nessuna materia ritirata.</div>')+'</div></section><section class="card"><div class="section-head"><div><div class="eyebrow">Utenti</div><h3 class="section-title">Approvazioni, accessi e statistiche</h3></div></div><div class="admin-list">'+(rows||'<div class="empty">Nessun utente.</div>')+'</div></section></div>','Admin','Controllo accessi e cloud',true);
 }
 function cloudPage(){
  const cfg=store.settings||{},user=cloudState.user;
@@ -763,6 +766,18 @@ if(a==='admin-retire-course'){
   toast('Materia eliminata per tutti · '+Number(out.deleted_banks||0)+' copie cloud');
   adminPage();
  }catch(e){alert('Eliminazione globale non riuscita:\n'+(e?.message||e));}
+ return;
+}
+if(a==='admin-restore-course'){
+ const courseId=b.dataset.course,subject=b.dataset.subject||courseId;
+ if(!courseId)return;
+ if(!confirm('Riabilitare “'+subject+'”?\n\nQuesto rimuove il blocco globale. I dati cancellati non vengono ripristinati automaticamente.'))return;
+ try{
+  await sync.adminRestoreCourse(courseId);
+  await refreshAdminData();
+  toast('Materia riabilitata ✅ · ora può essere reimportata');
+  adminPage();
+ }catch(e){alert('Riabilitazione non riuscita:\n'+(e?.message||e));}
  return;
 }
 if(a==='admin-status'){
