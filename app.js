@@ -402,13 +402,13 @@ async function cloudSync({silent=true}={}){
    courses:store.courses,
    clientId:store.sync?.clientId
   });
-  const retiredIds=[...(result.retiredCourseIds||[])];
-  if(retiredIds.length){
-   for(const id of retiredIds)delete store.courses[id];
-   store.sync.dirtyCourseIds=(store.sync?.dirtyCourseIds||[]).filter(id=>!retiredIds.includes(id));
-   store.sync.dirtyBankCourseIds=(store.sync?.dirtyBankCourseIds||[]).filter(id=>!retiredIds.includes(id));
-   store.sync.hiddenCourseIds=uniq([...(store.sync?.hiddenCourseIds||[]),...retiredIds]);
-   if(route.courseId&&retiredIds.includes(route.courseId)){route={name:'home',courseId:null};session=null;}
+  const blockedIds=[...(result.blockedCourseIds||[])];
+  if(blockedIds.length){
+   for(const id of blockedIds)delete store.courses[id];
+   store.sync.dirtyCourseIds=(store.sync?.dirtyCourseIds||[]).filter(id=>!blockedIds.includes(id));
+   store.sync.dirtyBankCourseIds=(store.sync?.dirtyBankCourseIds||[]).filter(id=>!blockedIds.includes(id));
+   store.sync.hiddenCourseIds=uniq([...(store.sync?.hiddenCourseIds||[]),...blockedIds]);
+   if(route.courseId&&blockedIds.includes(route.courseId)){route={name:'home',courseId:null};session=null;}
   }
   changedDuringSync=(store.sync?.lastLocalChangeAt||null)!==changeToken;
   if(!changedDuringSync){
@@ -610,7 +610,7 @@ async function deleteCourseEverywhere(id){
   await sync.deleteCloudCourse(id);
   delete store.courses[id];
   store.sync=store.sync||{};
-  store.sync.hiddenCourseIds=(store.sync.hiddenCourseIds||[]).filter(x=>x!==id);
+  store.sync.hiddenCourseIds=uniq([...(store.sync.hiddenCourseIds||[]),id]);
   store.sync.dirtyCourseIds=(store.sync.dirtyCourseIds||[]).filter(x=>x!==id);
   store.sync.dirtyBankCourseIds=(store.sync.dirtyBankCourseIds||[]).filter(x=>x!==id);
   store.sync.lastLocalChangeAt=now();
