@@ -384,6 +384,26 @@ async function hydrateCloudProfile(){
   await saveStore(store);
  }catch(e){console.warn('Profile pull',e);}
 }
+function applyConfirmedPushProgress(items=[]){
+ for(const item of items||[]){
+  if(!item?.courseId||!item?.progress||!store.courses[item.courseId])continue;
+  const local=shape(store.courses[item.courseId]);
+  const merged=sync.mergeProgress(sync.progressPayload(local),item.progress);
+  store.courses[item.courseId]=shape({
+   ...local,
+   attempts:merged.attempts,
+   exams:merged.exams,
+   marked:merged.marked,
+   pendingReview:merged.pendingReview,
+   historicalWrong:merged.historicalWrong,
+   fullCampaign:merged.fullCampaign,
+   syncMeta:merged.syncMeta,
+   cloudRevision:Number(item.revision||local.cloudRevision||0),
+   updatedAt:merged.updatedAt||local.updatedAt
+  });
+ }
+}
+
 function mergeRemoteCourses(rows=[]){
  const hidden=new Set(store.sync?.hiddenCourseIds||[]);
  for(const remote of rows){
@@ -450,11 +470,7 @@ async function cloudSync({silent=true}={}){
    store.sync.hiddenCourseIds=uniq([...(store.sync?.hiddenCourseIds||[]),...blockedIds]);
    if(route.courseId&&blockedIds.includes(route.courseId)){route={name:'home',courseId:null};session=null;}
   }
-  for(const item of result.push?.items||[]){
-   if(item?.courseId&&store.courses[item.courseId]){
-    store.courses[item.courseId].cloudRevision=Number(item.revision||store.courses[item.courseId].cloudRevision||0);
-   }
-  }
+  applyConfirmedPushProgress(result.push?.items||[]);
   changedDuringSync=(store.sync?.lastLocalChangeAt||null)!==changeToken;
   if(!changedDuringSync){
    mergeRemoteCourses(result.pull?.courses||[]);
