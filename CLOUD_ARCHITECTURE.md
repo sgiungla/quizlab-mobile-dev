@@ -15,11 +15,12 @@ Each course change is marked dirty locally.
 When online and authenticated:
 1. push local dirty profile/course changes;
 2. pull newer cloud revisions;
-3. merge by stable question IDs and append-only attempts/exams where possible;
-4. resolve simultaneous edits through revision + updated_at instead of replacing blindly;
-5. clear dirty markers only after a confirmed server write.
+3. write progress through an atomic optimistic-concurrency RPC;
+4. on a revision conflict, merge append-only attempts/exams plus timestamped mutable state and retry against the newest revision;
+5. propagate reset timestamps so performance/review/full-cycle resets cannot be undone by a stale device;
+6. clear dirty markers only after a confirmed server write.
 
-Deletes will use tombstones before full two-way sync is enabled.
+Per-user deletes and Admin global retirements use tombstones. Direct authenticated writes to progress rows are disabled from v0.7 onward so stale clients cannot bypass revision checks.
 
 ## Safety
 Never use a Supabase service-role key in this repository or in browser code.
