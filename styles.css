@@ -157,7 +157,7 @@ body{background:
  radial-gradient(circle at 82% 10%,rgba(45,212,191,.18),transparent 28%),
  radial-gradient(circle at 15% 120%,rgba(34,197,94,.12),transparent 35%),
  linear-gradient(135deg,#071a2e,#08263a 58%,#07271f);border-color:#176278}
-.mobile-home-hero:before{content:"";position:absolute;right:-80px;bottom:-85px;width:260px;height:260px;background:url('./icons/quizlab-sgiungla-neon-192.png') center/contain no-repeat;opacity:.075;transform:rotate(-8deg);pointer-events:none}
+.mobile-home-hero:before{content:"";position:absolute;right:-80px;bottom:-85px;width:260px;height:260px;background:url('./icons/quizlab-sgiungla-monkey-192.png') center/contain no-repeat;opacity:.075;transform:rotate(-8deg);pointer-events:none}
 .mobile-brand-row{position:relative;z-index:1;display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center}
 .mobile-hero-mark{width:62px;height:62px;border-radius:18px;object-fit:cover;border:1px solid #1b8aa1;box-shadow:0 14px 30px rgba(0,0,0,.26)}
 .mobile-home-hero .avatar.large{width:74px;height:74px;border:3px solid rgba(45,212,191,.7);box-shadow:0 12px 28px rgba(0,0,0,.32)}
@@ -201,7 +201,7 @@ body{background:
 }
 .mobile-home-hero:before{
  right:-18px;bottom:-42px;width:250px;height:250px;
- background:url('./icons/quizlab-sgiungla-neon-192.png') center/contain no-repeat;
+ background:url('./icons/quizlab-sgiungla-monkey-192.png') center/contain no-repeat;
  opacity:.16;filter:drop-shadow(0 18px 30px rgba(0,0,0,.25))
 }
 .mobile-home-hero:after{
@@ -236,18 +236,24 @@ body{background:
 .mobile-bottom-nav button{position:relative;z-index:1}
 
 /* v0.9.2 · mascot emphasis */
-.mobile-home-hero:before{background-image:url('./icons/quizlab-sgiungla-neon-192.png');opacity:.22;right:-28px;bottom:-38px;width:245px;height:245px}
+.mobile-home-hero:before{background-image:url('./icons/quizlab-sgiungla-monkey-192.png');opacity:.22;right:-28px;bottom:-38px;width:245px;height:245px}
 .app-mark{border-color:#22d3ee;background:#071827;box-shadow:0 8px 26px rgba(34,211,238,.18)}
 .mobile-hero-mark{border-color:#2dd4bf;box-shadow:0 14px 34px rgba(0,0,0,.32),0 0 0 1px rgba(45,212,191,.12)}
 .mobile-bottom-nav button.active{box-shadow:inset 0 0 0 1px #1ab5a7,0 0 18px rgba(45,212,191,.08)}
 
 /* v0.9.3 · clean brand icon, no monkey mascot */
 .mobile-home-hero:before{
-  background-image:url('./icons/quizlab-sgiungla-neon-192.png');
+  background-image:url('./icons/quizlab-sgiungla-monkey-192.png');
   width:220px;height:220px;right:-24px;bottom:-28px;
   opacity:.12;filter:drop-shadow(0 16px 26px rgba(0,0,0,.20))
 }
 .mobile-hero-mark,.app-mark{object-fit:cover}
 
 /* v0.9.4 exact QuizLab Sgiungla icon asset */
-.mobile-home-hero:before{background-image:url('./icons/quizlab-sgiungla-neon-192.png')}
+.mobile-home-hero:before{background-image:url('./icons/quizlab-sgiungla-monkey-192.png')}
+
+/* v0.9.5 · beloved Sgiungla mascot integrated */
+.app-mark{width:44px;height:44px;border-radius:13px;object-fit:cover;border:1px solid #20d6c1}
+.mobile-hero-mark{width:86px;height:86px;border-radius:22px;object-fit:cover;border:2px solid #2dd4bf;box-shadow:0 16px 34px rgba(0,0,0,.34),0 0 22px rgba(45,212,191,.10)}
+.mobile-home-hero:before{background-image:url('./icons/quizlab-sgiungla-monkey-192.png');width:255px;height:255px;right:-38px;bottom:-46px;opacity:.16}
+@media(max-width:560px){.mobile-hero-mark{width:78px;height:78px;border-radius:20px}}
