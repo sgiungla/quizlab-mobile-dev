@@ -378,12 +378,10 @@ async function selectWorkspaceForSession(authSession,{explicit=false}={}){
   return;
  }
  let importGuest=false,markGuestHandled=false;
- if(explicit){
-  const info=await workspaceMigrationInfo(user.id);
-  if(info.needsDecision){
-   importGuest=confirm('Dati locali rilevati su questo dispositivo.\n\nOK = importa/merge questi dati nell’account '+(user.email||'corrente')+'.\nAnnulla = usa solo i dati cloud di questo account.\n\nI dati locali resteranno comunque conservati.');
-   markGuestHandled=true;
-  }
+ const info=await workspaceMigrationInfo(user.id);
+ if(info.needsDecision){
+  importGuest=confirm('Dati locali rilevati su questo dispositivo.\n\nOK = importa/merge questi dati nell’account '+(user.email||'corrente')+'.\nAnnulla = usa solo i dati cloud di questo account.\n\nI dati locali resteranno comunque conservati.');
+  markGuestHandled=true;
  }
  store=await selectWorkspace(user.id,{importGuest,markGuestHandled});
  store.sync.ownerId=user.id;
