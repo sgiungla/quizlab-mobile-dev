@@ -366,13 +366,14 @@ async function handleAvatar(e){
  reader.readAsDataURL(f);
 }
 
-async function selectWorkspaceForSession(session,{explicit=false}={}){
- const user=session?.user||null;
+async function selectWorkspaceForSession(authSession,{explicit=false}={}){
+ const user=authSession?.user||null;
  if(!user){
   store=await selectWorkspace(null);
   cloudState={status:'cloud-ready',user:null};
   accessState={status:'active',isAdmin:false,legacy:true};
   route={name:'cloud',courseId:null};
+  globalThis.__quizlabSessionReset=Date.now();
   session=null;
   return;
  }
