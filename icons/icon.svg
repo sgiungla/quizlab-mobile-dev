@@ -1,1 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#0f172a"/><circle cx="256" cy="256" r="172" fill="#38bdf8"/><path d="M154 171h204v48H154zm0 75h204v48H154zm0 75h132v48H154z" fill="#082f49"/><path d="m313 319 28 28 52-70 31 23-80 108-61-61z" fill="#e0f2fe"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="QuizLab Sgiungla">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#020617"/><stop offset="1" stop-color="#0b1f2f"/></linearGradient>
+  <linearGradient id="q" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f8fafc"/><stop offset=".55" stop-color="#67e8f9"/><stop offset="1" stop-color="#22d3ee"/></linearGradient>
+  <linearGradient id="leaf" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#059669"/><stop offset=".5" stop-color="#22c55e"/><stop offset="1" stop-color="#a3e635"/></linearGradient>
+  <filter id="glow"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>
+<rect width="512" height="512" rx="112" fill="url(#bg)"/>
+<path d="M102 371c40-6 81-31 105-71-48 12-83 37-105 71Zm44 58c47-17 87-51 108-97-52 19-90 50-108 97Zm264-58c-38-7-76-30-100-68 45 11 80 35 100 68Zm-42 55c-47-18-86-50-108-94 51 18 89 48 108 94Z" fill="url(#leaf)" opacity=".95"/>
+<path d="M256 92c-94 0-170 72-170 162s76 162 170 162c31 0 60-8 85-22l38 41 44-39-38-41c25-28 41-63 41-101 0-90-76-162-170-162Zm0 70c55 0 100 41 100 92s-45 92-100 92-100-41-100-92 45-92 100-92Z" fill="url(#q)" filter="url(#glow)"/>
+<path d="m252 58 112 42-112 42-112-42 112-42Zm69 66v53c0 20-31 37-69 37s-69-17-69-37v-53l69 26 69-26Z" fill="#22d3ee"/>
+<path d="M364 101v76" stroke="#facc15" stroke-width="11" stroke-linecap="round"/><circle cx="364" cy="187" r="11" fill="#facc15"/>
+<g fill="#07111f"><circle cx="229" cy="236" r="10"/><rect x="250" y="227" width="74" height="18" rx="9"/><circle cx="229" cy="273" r="10"/><rect x="250" y="264" width="58" height="18" rx="9"/></g>
+</svg>
