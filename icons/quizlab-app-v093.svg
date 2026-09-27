@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="QuizLab Sgiungla">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#03111f"/><stop offset=".62" stop-color="#06273a"/><stop offset="1" stop-color="#073326"/></linearGradient>
+  <linearGradient id="q" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffffff"/><stop offset=".58" stop-color="#62e9f5"/><stop offset="1" stop-color="#0ea5e9"/></linearGradient>
+  <linearGradient id="leaf" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#059669"/><stop offset=".55" stop-color="#22c55e"/><stop offset="1" stop-color="#a3e635"/></linearGradient>
+</defs>
+<rect x="8" y="8" width="496" height="496" rx="106" fill="url(#bg)" stroke="#19c9bd" stroke-width="8"/>
+<g opacity=".94" fill="url(#leaf)">
+  <path d="M48 174c55-10 95-41 118-91-53 11-93 43-118 91Z"/>
+  <path d="M62 244c52-10 95-38 126-83-56 8-98 38-126 83Z"/>
+  <path d="M464 179c-55-9-97-40-122-90 56 11 98 43 122 90Z"/>
+  <path d="M453 246c-50-10-91-37-121-80 54 8 95 37 121 80Z"/>
+</g>
+<g transform="translate(0,-18)">
+  <path d="M254 72c-86 0-156 65-156 146s70 146 156 146c28 0 55-7 78-20l35 37 40-35-35-37c23-25 38-57 38-91 0-81-70-146-156-146Zm0 63c50 0 91 37 91 83s-41 83-91 83-91-37-91-83 41-83 91-83Z" fill="url(#q)"/>
+  <path d="m250 41 102 38-102 38-102-38 102-38Zm63 60v48c0 18-28 33-63 33s-63-15-63-33v-48l63 24 63-24Z" fill="#22d3ee"/>
+  <path d="M352 80v69" stroke="#facc15" stroke-width="10" stroke-linecap="round"/><circle cx="352" cy="158" r="10" fill="#facc15"/>
+  <g fill="#06111d"><circle cx="229" cy="202" r="9"/><rect x="249" y="194" width="69" height="16" rx="8"/><circle cx="229" cy="236" r="9"/><rect x="249" y="228" width="54" height="16" rx="8"/></g>
+  <path d="M112 316c34-7 70-28 91-63-41 10-72 31-91 63Zm285-2c-34-7-67-27-88-60 40 9 70 30 88 60Z" fill="url(#leaf)"/>
+</g>
+<text x="256" y="397" text-anchor="middle" fill="#f8fafc" font-family="Arial, Helvetica, sans-serif" font-size="62" font-weight="900" letter-spacing="-2">QuizLab</text>
+<text x="256" y="443" text-anchor="middle" fill="#5ee98d" font-family="Arial, Helvetica, sans-serif" font-size="31" font-weight="900" letter-spacing="6">SGIUNGLA</text>
+</svg>
