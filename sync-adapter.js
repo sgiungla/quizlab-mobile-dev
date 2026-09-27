@@ -224,9 +224,11 @@ export class QuizLabSyncAdapter {
     const baseAt=p.updatedAt||p.createdAt||'1970-01-01T00:00:00.000Z';
     const rawMeta=p.syncMeta&&typeof p.syncMeta==='object'?p.syncMeta:{};
     const meta={
-      version:2,
+      version:3,
       performanceResetAt:rawMeta.performanceResetAt||null,
+      examResetAt:rawMeta.examResetAt||null,
       reviewResetAt:rawMeta.reviewResetAt||null,
+      removedQuestionAt:this.normalizeTimeMap(rawMeta.removedQuestionAt),
       markedState:this.normalizeStateMap(rawMeta.markedState),
       pendingState:this.normalizeStateMap(rawMeta.pendingState),
       historicalWrongAt:this.normalizeTimeMap(rawMeta.historicalWrongAt),
@@ -274,7 +276,14 @@ export class QuizLabSyncAdapter {
     return out;
   }
 
-  mergeEvents(a=[],b=[],kind,resetAt=null){
+  eventSurvives(e,resetAt=null,removedQuestionAt={}){
+    if(resetAt&&(!e?.at||String(e.at)<String(resetAt)))return false;
+    const removedAt=e?.questionId?removedQuestionAt?.[e.questionId]:null;
+    if(removedAt&&(!e?.at||String(e.at)<String(removedAt)))return false;
+    return true;
+  }
+
+  mergeEvents(a=[],b=[],kind,resetAt=null,removedQuestionAt={}){
     const map=new Map();
     for(const raw of [...a,...b]){
       const e={...raw,eventId:this.eventId(kind,raw)};
@@ -283,10 +292,7 @@ export class QuizLabSyncAdapter {
       if(!prev||String(e.at||'')>=String(prev.at||''))map.set(key,e);
     }
     return [...map.values()]
-      // Once a performance reset exists, an undated legacy event must be treated
-      // as pre-reset. New QuizLab events always carry `at`, so allowing !e.at
-      // here would let old imported/stale attempts resurrect after a reset.
-      .filter(e=>!resetAt||(e.at&&String(e.at)>=String(resetAt)))
+      .filter(e=>this.eventSurvives(e,resetAt,removedQuestionAt))
       .sort((x,y)=>String(x.at||'').localeCompare(String(y.at||'')));
   }
 
@@ -294,9 +300,11 @@ export class QuizLabSyncAdapter {
     const a=this.normalizeProgress(localProgress);
     const b=this.normalizeProgress(remoteProgress);
     const performanceResetAt=this.maxIso(a.syncMeta.performanceResetAt,b.syncMeta.performanceResetAt);
+    const examResetAt=this.maxIso(a.syncMeta.examResetAt,b.syncMeta.examResetAt);
     const reviewResetAt=this.maxIso(a.syncMeta.reviewResetAt,b.syncMeta.reviewResetAt);
-    const attempts=this.mergeEvents(a.attempts,b.attempts,'attempt',performanceResetAt);
-    const exams=this.mergeEvents(a.exams,b.exams,'exam',performanceResetAt);
+    const removedQuestionAt=this.mergeTimeMaps(a.syncMeta.removedQuestionAt,b.syncMeta.removedQuestionAt);
+    const attempts=this.mergeEvents(a.attempts,b.attempts,'attempt',performanceResetAt,removedQuestionAt);
+    const exams=this.mergeEvents(a.exams,b.exams,'exam',this.maxIso(performanceResetAt,examResetAt));
     const markedState=this.mergeStateMaps(a.syncMeta.markedState,b.syncMeta.markedState);
     const pendingState=this.mergeStateMaps(a.syncMeta.pendingState,b.syncMeta.pendingState);
     const historicalWrongAt=this.mergeTimeMaps(a.syncMeta.historicalWrongAt,b.syncMeta.historicalWrongAt);
@@ -314,14 +322,20 @@ export class QuizLabSyncAdapter {
       }
     }
 
+    const stateSurvives=(id,at,resetAt)=>{
+      if(resetAt&&(!at||String(at)<String(resetAt)))return false;
+      const removedAt=removedQuestionAt[id];
+      if(removedAt&&(!at||String(at)<String(removedAt)))return false;
+      return true;
+    };
     const marked=Object.entries(markedState)
-      .filter(([,v])=>v.value&&(!reviewResetAt||!v.at||String(v.at)>=String(reviewResetAt)))
+      .filter(([id,v])=>v.value&&stateSurvives(id,v.at,reviewResetAt))
       .map(([id])=>id);
     const pendingReview=Object.entries(pendingState)
-      .filter(([,v])=>v.value&&(!reviewResetAt||!v.at||String(v.at)>=String(reviewResetAt)))
+      .filter(([id,v])=>v.value&&stateSurvives(id,v.at,reviewResetAt))
       .map(([id])=>id);
     const historicalWrong=Object.entries(historicalWrongAt)
-      .filter(([,at])=>!reviewResetAt||!at||String(at)>=String(reviewResetAt))
+      .filter(([id,at])=>stateSurvives(id,at,reviewResetAt))
       .map(([id])=>id);
 
     const fullResetAt=this.maxIso(a.fullCampaign.resetAt,b.fullCampaign.resetAt);
@@ -331,13 +345,13 @@ export class QuizLabSyncAdapter {
       }
     }
     const seenIds=Object.entries(fullSeenAt)
-      .filter(([,at])=>!fullResetAt||!at||String(at)>=String(fullResetAt))
+      .filter(([id,at])=>stateSurvives(id,at,fullResetAt))
       .map(([id])=>id);
 
     return {
       attempts,exams,marked,pendingReview,historicalWrong,
       fullCampaign:{signature:'all',seenIds,resetAt:fullResetAt},
-      syncMeta:{version:2,performanceResetAt,reviewResetAt,markedState,pendingState,historicalWrongAt,fullSeenAt},
+      syncMeta:{version:3,performanceResetAt,examResetAt,reviewResetAt,removedQuestionAt,markedState,pendingState,historicalWrongAt,fullSeenAt},
       createdAt:a.createdAt&&b.createdAt?(String(a.createdAt)<=String(b.createdAt)?a.createdAt:b.createdAt):(a.createdAt||b.createdAt||null),
       updatedAt:new Date().toISOString()
     };
