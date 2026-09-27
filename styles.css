@@ -187,3 +187,50 @@ body{background:
 @media(max-width:560px){
  .mobile-brand-row{grid-template-columns:auto 1fr}.mobile-home-hero .avatar.large{grid-column:1/-1;justify-self:start;width:66px;height:66px}.mobile-hero-mark{width:54px;height:54px}.mobile-home-hero h1{font-size:22px}.hero-actions .btn{min-width:0}.mobile-bottom-nav{width:calc(100vw - 18px);justify-content:space-around}.mobile-bottom-nav button{min-width:0;flex:1;padding:7px 4px}
 }
+
+
+/* v0.9.1 · jungle polish aligned with Desktop 0.11.2 */
+.mobile-home-hero{
+ background:
+  linear-gradient(105deg,rgba(2,14,26,.96) 0%,rgba(3,25,38,.86) 54%,rgba(2,32,28,.66) 100%),
+  radial-gradient(circle at 82% 22%,rgba(45,212,191,.22),transparent 24%),
+  radial-gradient(circle at 18% 105%,rgba(34,197,94,.18),transparent 35%),
+  linear-gradient(135deg,#061426,#083043 58%,#073325);
+ border-color:#16859a;
+ box-shadow:0 18px 42px rgba(0,0,0,.28),inset 0 0 0 1px rgba(45,212,191,.04)
+}
+.mobile-home-hero:before{
+ right:-18px;bottom:-42px;width:250px;height:250px;
+ background:url('./icons/quizlab-sgiungla-v106.svg') center/contain no-repeat;
+ opacity:.16;filter:drop-shadow(0 18px 30px rgba(0,0,0,.25))
+}
+.mobile-home-hero:after{
+ content:"";position:absolute;inset:0;pointer-events:none;
+ background:
+  radial-gradient(ellipse at 0% 100%,rgba(34,197,94,.18),transparent 32%),
+  radial-gradient(ellipse at 100% 0%,rgba(45,212,191,.11),transparent 30%);
+ mix-blend-mode:screen
+}
+.mobile-brand-row,.hero-pills,.hero-actions{position:relative;z-index:2}
+.course-card{
+ background:linear-gradient(180deg,rgba(6,27,44,.98),rgba(4,16,29,.98));
+ border-color:#1a465d
+}
+.course-card:hover{border-color:#2dd4bf}
+.sync-panel>div{background:linear-gradient(180deg,#071827,#06111f);border-color:#1d4054}
+.cloud-badge.ok{box-shadow:0 0 20px rgba(34,197,94,.08)}
+.card.jungle-hero:not(.mobile-home-hero){
+ background:
+  radial-gradient(circle at 92% 4%,rgba(34,197,94,.14),transparent 30%),
+  radial-gradient(circle at 2% 100%,rgba(34,211,238,.10),transparent 32%),
+  linear-gradient(180deg,rgba(10,29,48,.99),rgba(5,18,32,.99))
+}
+.mobile-bottom-nav{
+ background:linear-gradient(180deg,rgba(3,16,28,.96),rgba(2,10,22,.97));
+ border-color:#22506a
+}
+.mobile-bottom-nav:before{
+ content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+ background:radial-gradient(circle at 12% 120%,rgba(34,197,94,.15),transparent 32%),radial-gradient(circle at 92% 120%,rgba(45,212,191,.11),transparent 30%)
+}
+.mobile-bottom-nav button{position:relative;z-index:1}
