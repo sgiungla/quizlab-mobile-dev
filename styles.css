@@ -293,3 +293,16 @@ body{background:
   .app-mark{width:56px!important;height:56px!important}
   .mobile-hero-mark{width:98px!important;height:98px!important}
 }
+
+/* v0.10.1 · readable mascot lockup */
+.mascot-lockup{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:none}
+.mascot-lockup span{display:block;margin-top:3px;color:#55f08b;font-size:9px;font-weight:900;letter-spacing:.12em;line-height:1;text-shadow:0 0 10px rgba(34,197,94,.35)}
+.mascot-lockup-hero span{font-size:11px;margin-top:5px;letter-spacing:.14em}
+.app-mark{width:62px!important;height:62px!important;object-fit:contain!important}
+.mobile-hero-mark{width:112px!important;height:112px!important;object-fit:contain!important}
+@media(max-width:560px){
+  .app-mark{width:58px!important;height:58px!important}
+  .mobile-hero-mark{width:104px!important;height:104px!important}
+  .mascot-lockup-small span{font-size:8px}
+  .mascot-lockup-hero span{font-size:10px}
+}

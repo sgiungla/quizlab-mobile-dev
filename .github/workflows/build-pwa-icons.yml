@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "icons/quizlab-sgiungla-monkey-192.jpg"
+      - "icons/quizlab-sgiungla-v106.svg"
       - ".github/workflows/build-pwa-icons.yml"
   workflow_dispatch:
 
@@ -21,25 +21,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-      - name: Generate real raster PWA icons
+      - name: Generate valid raster PWA icons
         run: |
-          python -m pip install --quiet pillow
+          python -m pip install --quiet cairosvg
           python - <<'PY'
-          from PIL import Image, ImageFile
-          ImageFile.LOAD_TRUNCATED_IMAGES = True
-          src = Image.open("icons/quizlab-sgiungla-final-192.jpg").convert("RGB")
-          for size in (192, 512):
-              im = src.resize((size, size), Image.Resampling.LANCZOS)
-              im.save(f"icons/quizlab-sgiungla-monkey-{size}.png", optimize=True)
+          import cairosvg
+          src="icons/quizlab-sgiungla-v106.svg"
+          for size in (192,512):
+              cairosvg.svg2png(url=src,write_to=f"icons/quizlab-sgiungla-app-{size}.png",output_width=size,output_height=size)
           PY
       - name: Commit generated icons
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add icons/quizlab-sgiungla-monkey-192.png icons/quizlab-sgiungla-monkey-512.png
+          git add icons/quizlab-sgiungla-app-192.png icons/quizlab-sgiungla-app-512.png
           if git diff --cached --quiet; then
             echo "Icons already up to date."
           else
-            git commit -m "Generate 192 and 512 PWA icons"
+            git commit -m "Generate valid PWA install icons"
             git push
           fi
