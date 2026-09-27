@@ -1,4 +1,4 @@
-import {loadStore,saveStore,emptyStore} from './db.js';
+import {loadStore,saveStore,emptyStore,workspaceMigrationInfo,selectWorkspace,currentWorkspaceKey} from './db.js';
 import {QuizLabSyncAdapter} from './sync-adapter.js';
 import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
 
@@ -20,6 +20,7 @@ let autoSyncTimer=null;
 let syncInFlight=false;
 let syncQueuedManual=false;
 let lastSyncError=false;
+let explicitAuthIntent=false;
 
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const norm=s=>String(s??'').replace(/\s+/g,' ').trim();
@@ -365,6 +366,31 @@ async function handleAvatar(e){
  reader.readAsDataURL(f);
 }
 
+async function selectWorkspaceForSession(session,{explicit=false}={}){
+ const user=session?.user||null;
+ if(!user){
+  store=await selectWorkspace(null);
+  cloudState={status:'cloud-ready',user:null};
+  accessState={status:'active',isAdmin:false,legacy:true};
+  route={name:'cloud',courseId:null};
+  session=null;
+  return;
+ }
+ let importGuest=false,markGuestHandled=false;
+ if(explicit){
+  const info=await workspaceMigrationInfo(user.id);
+  if(info.needsDecision){
+   importGuest=confirm('Dati locali rilevati su questo dispositivo.\n\nOK = importa/merge questi dati nell’account '+(user.email||'corrente')+'.\nAnnulla = usa solo i dati cloud di questo account.\n\nI dati locali resteranno comunque conservati.');
+   markGuestHandled=true;
+  }
+ }
+ store=await selectWorkspace(user.id,{importGuest,markGuestHandled});
+ store.sync.ownerId=user.id;
+ await saveStore(store);
+ route={name:'home',courseId:null};
+ session=null;
+}
+
 async function applyDefaultCloudConfig(){
  const d=DEFAULT_CLOUD_CONFIG||{};
  if(!store.settings)store.settings={};
@@ -499,8 +525,8 @@ async function cloudSync({silent=true}={}){
   store.sync.mode='cloud-online';
   await saveStore(store);
   lastSyncError=false;
-  if(!silent)toast('Sincronizzazione completa ☁️');
-  render();
+  if(!silent){toast('Sincronizzazione completa ☁️');render();}
+  else refreshSyncBadge();
   return true;
  }catch(e){
   lastSyncError=true;
@@ -535,11 +561,12 @@ async function startCloud(){
   await applyDefaultCloudConfig();
   cloudState=await sync.start({
    settings:store.settings||{},
-   onAuthChange:async ({session,status})=>{
+   onAuthChange:async ({event,session,status})=>{
     cloudState={status,user:session?.user||null};
+    const explicit=explicitAuthIntent||event==='SIGNED_IN';
+    explicitAuthIntent=false;
+    await selectWorkspaceForSession(session,{explicit});
     store.sync.mode=status;
-    if(session?.user)store.sync.ownerId=session.user.id;
-    await saveStore(store);
     if(session?.user){
       try{await sync.ensurePendingRegistration();}catch(e){console.warn('Pending registration',e);}
       try{accessState=await sync.accessState();}catch(e){accessState={status:'active',isAdmin:false,legacy:true};console.warn('Access state',e);}
@@ -551,16 +578,12 @@ async function startCloud(){
       }else{
         route.name='access';
       }
-    }else{
-      accessState={status:'active',isAdmin:false,legacy:true};
-      if(sync.configured(store.settings||{}))route.name='cloud';
-    }
+    }else if(sync.configured(store.settings||{}))route.name='cloud';
     render();
    }
   });
   if(cloudState.user){
-    store.sync.ownerId=cloudState.user.id;
-    await saveStore(store);
+    await selectWorkspaceForSession({user:cloudState.user},{explicit:false});
     try{await sync.ensurePendingRegistration();}catch(e){console.warn('Pending registration',e);}
     try{accessState=await sync.accessState();}catch(e){accessState={status:'active',isAdmin:false,legacy:true};console.warn('Access state',e);}
     if(accessState.status==='active'){
@@ -811,9 +834,9 @@ if(a==='sign-up'){
 }
 if(a==='sign-in'){
  const email=norm(document.getElementById('authEmail')?.value),password=String(document.getElementById('authPassword')?.value||'');
- const {error}=await sync.signIn(email,password);if(error){alert(error.message);return;}toast('Accesso effettuato ☁️');return;
+ explicitAuthIntent=true;const {error}=await sync.signIn(email,password);if(error){explicitAuthIntent=false;alert(error.message);return;}toast('Accesso effettuato ☁️');return;
 }
-if(a==='sign-out'){await sync.signOut();toast('Disconnesso dal cloud');return;}
+if(a==='sign-out'){await sync.signOut();await selectWorkspaceForSession(null,{explicit:false});toast('Disconnesso dal cloud');render();return;}
 if(a==='refresh-access'){
  try{
   await refreshAccessGate({renderBlocked:false});
