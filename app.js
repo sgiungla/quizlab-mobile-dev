@@ -18,6 +18,7 @@ let adminData={users:[],storage:null,courses:[],retiredCourses:[],loaded:false};
 let adminPendingCount=0;
 let autoSyncTimer=null;
 let syncInFlight=false;
+let syncQueuedManual=false;
 let lastSyncError=false;
 
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -452,7 +453,17 @@ async function refreshAccessGate({renderBlocked=true}={}){
  }
 }
 async function cloudSync({silent=true}={}){
- if(syncInFlight||!cloudState.user||!navigator.onLine)return false;
+ if(!cloudState.user||!navigator.onLine)return false;
+ // A manual click must never be silently discarded just because an automatic
+ // sync is already running. Queue one follow-up pass so the UI is hydrated
+ // with the newest cloud state as soon as the current pass finishes.
+ if(syncInFlight){
+  if(!silent){
+   syncQueuedManual=true;
+   toast('Sincronizzazione già in corso · aggiorno appena termina ☁️');
+  }
+  return false;
+ }
  if(accessState.status!=='active'){route.name='access';render();return false;}
  const changeToken=store.sync?.lastLocalChangeAt||null;
  const dirtyAtStart=[...(store.sync?.dirtyCourseIds||[])];
@@ -504,7 +515,11 @@ async function cloudSync({silent=true}={}){
  }finally{
   syncInFlight=false;
   refreshSyncBadge();
-  if(changedDuringSync&&cloudState.user&&navigator.onLine)setTimeout(()=>cloudSync({silent:true}),120);
+  const runQueuedManual=syncQueuedManual;
+  syncQueuedManual=false;
+  if((changedDuringSync||runQueuedManual)&&cloudState.user&&navigator.onLine){
+   setTimeout(()=>cloudSync({silent:!runQueuedManual}),120);
+  }
  }
 }
 function scheduleAutoSync(){
