@@ -177,7 +177,7 @@ function chapterBadge(x){
 
 function top(title,sub,back){
  const adminAlert=accessState.isAdmin&&adminPendingCount>0?'<button class="admin-alert" data-action="open-admin" title="Richieste di accesso in attesa">🛡️ '+adminPendingCount+'</button>':'';
- return '<header class="topbar"><div class="topbar-row">'+(back?'<button class="icon-btn" data-action="back">←</button>':'')+'<div class="brand-lockup"><img class="app-mark" src="./icons/quizlab-sgiungla-v106-48.png" alt=""><div class="brand">'+esc(title)+'<small>'+esc(sub||'')+'</small></div></div><div class="spacer"></div>'+adminAlert+'<button class="profile-chip" data-action="profile">'+avatarHtml('tiny')+'<span>'+(store.profile?.displayName?esc(store.profile.displayName.split(' ')[0]):'Profilo')+'</span></button>'+syncBadgeHtml()+'</div></header>';
+ return '<header class="topbar"><div class="topbar-row">'+(back?'<button class="icon-btn" data-action="back">←</button>':'')+'<div class="brand-lockup"><img class="app-mark" src="./icons/quizlab-sgiungla-v106.svg" alt=""><div class="brand">'+esc(title)+'<small>'+esc(sub||'')+'</small></div></div><div class="spacer"></div>'+adminAlert+'<button class="profile-chip" data-action="profile">'+avatarHtml('tiny')+'<span>'+(store.profile?.displayName?esc(store.profile.displayName.split(' ')[0]):'Profilo')+'</span></button>'+syncBadgeHtml()+'</div></header>';
 }
 function page(body,title='QuizLab Mobile DEV',sub='offline-first',back=false){app.innerHTML='<div>'+top(title,sub,back)+'<main class="main">'+body+'</main></div>';}
 function setRoute(name,courseId=route.courseId){if(examTimer){clearInterval(examTimer);examTimer=null;}route={name,courseId};session=null;render();}
