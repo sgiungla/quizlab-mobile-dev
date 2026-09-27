@@ -7,5 +7,9 @@
   "display":"standalone",
   "background_color":"#020617",
   "theme_color":"#052e16",
-  "icons":[{"src":"./icons/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+  "icons":[
+    {"src":"./icons/quizlab-sgiungla-v106-192.png","sizes":"192x192","type":"image/png","purpose":"any"},
+    {"src":"./icons/quizlab-sgiungla-v106-512.png","sizes":"512x512","type":"image/png","purpose":"any"},
+    {"src":"./icons/quizlab-sgiungla-v106-maskable-512.png","sizes":"512x512","type":"image/png","purpose":"maskable"}
+  ]
 }
