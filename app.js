@@ -21,6 +21,7 @@ let syncInFlight=false;
 let syncQueuedManual=false;
 let lastSyncError=false;
 let explicitAuthIntent=false;
+let guestDataPending=false;
 
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const norm=s=>String(s??'').replace(/\s+/g,' ').trim();
@@ -372,18 +373,17 @@ async function selectWorkspaceForSession(authSession,{explicit=false}={}){
   store=await selectWorkspace(null);
   cloudState={status:'cloud-ready',user:null};
   accessState={status:'active',isAdmin:false,legacy:true};
+  guestDataPending=false;
   route={name:'cloud',courseId:null};
   globalThis.__quizlabSessionReset=Date.now();
   session=null;
   return;
  }
- let importGuest=false,markGuestHandled=false;
  const info=await workspaceMigrationInfo(user.id);
- if(info.needsDecision){
-  importGuest=confirm('Dati locali rilevati su questo dispositivo.\n\nOK = importa/merge questi dati nell’account '+(user.email||'corrente')+'.\nAnnulla = usa solo i dati cloud di questo account.\n\nI dati locali resteranno comunque conservati.');
-  markGuestHandled=true;
- }
- store=await selectWorkspace(user.id,{importGuest,markGuestHandled});
+ guestDataPending=!!info.needsDecision;
+ // Safe default: login always opens only this account's workspace.
+ // Local guest data stays separate until the user explicitly imports it from the UI.
+ store=await selectWorkspace(user.id,{importGuest:false,markGuestHandled:false});
  store.sync.ownerId=user.id;
  await saveStore(store);
  route={name:'home',courseId:null};
@@ -674,7 +674,7 @@ function cloudPage(){
  }else if(!user){
   body+='<section class="card"><h2 class="section-title">Account</h2><label>Email<input id="authEmail" type="email" autocomplete="email"></label><label>Password<input id="authPassword" type="password" autocomplete="current-password" minlength="8"></label><div class="actions"><button class="btn" data-action="sign-in">Accedi</button><button class="btn secondary" data-action="sign-up">Crea account</button></div><button class="btn ghost" data-action="reset-cloud-config">Cambia configurazione cloud</button></section>';
  }else{
-  body+='<section class="card"><h2 class="section-title">Sincronizzazione</h2><div class="sync-panel"><div><span>Account</span><strong>'+esc(user.email||user.id)+'</strong></div><div><span>Stato</span><strong>'+esc(syncBadgeModel().label)+'</strong></div><div><span>Ultima sincronizzazione</span><strong>'+esc(fmtSyncAgo(store.sync?.lastPullAt||store.sync?.lastPushAt)||'non ancora completata')+'</strong></div><div><span>Dati locali da sincronizzare</span><strong>'+((store.sync?.dirtyCourseIds||[]).length)+' materie</strong></div></div><div class="actions"><button class="btn" data-action="sync-all">Sincronizza tutto</button><button class="btn secondary" data-action="push-profile">Sincronizza profilo</button>'+(accessState.isAdmin?'<button class="btn secondary" data-action="open-admin">🛡️ Admin'+(adminPendingCount?' · '+adminPendingCount:'')+'</button>':'')+'<button class="btn ghost" data-action="sign-out">Esci</button></div><p class="subtle">La sincronizzazione è automatica. Il pulsante serve solo per forzarla subito manualmente.</p></section>';
+  body+='<section class="card"><h2 class="section-title">Sincronizzazione</h2><div class="sync-panel"><div><span>Account</span><strong>'+esc(user.email||user.id)+'</strong></div><div><span>Stato</span><strong>'+esc(syncBadgeModel().label)+'</strong></div><div><span>Ultima sincronizzazione</span><strong>'+esc(fmtSyncAgo(store.sync?.lastPullAt||store.sync?.lastPushAt)||'non ancora completata')+'</strong></div><div><span>Dati locali da sincronizzare</span><strong>'+((store.sync?.dirtyCourseIds||[]).length)+' materie</strong></div></div>'+(guestDataPending?'<div class="local-data-notice"><strong>🗂️ Dati locali non associati rilevati</strong><p class="subtle">Per sicurezza non sono stati collegati automaticamente a questo account.</p><div class="actions"><button class="btn secondary" data-action="keep-local-separate">Mantieni separati</button><button class="btn" data-action="import-local-data">Importa dati locali</button></div></div>':'')+'<div class="actions"><button class="btn" data-action="sync-all">Sincronizza tutto</button><button class="btn secondary" data-action="push-profile">Sincronizza profilo</button>'+(accessState.isAdmin?'<button class="btn secondary" data-action="open-admin">🛡️ Admin'+(adminPendingCount?' · '+adminPendingCount:'')+'</button>':'')+'<button class="btn ghost" data-action="sign-out">Esci</button></div><p class="subtle">La sincronizzazione è automatica. Il pulsante serve solo per forzarla subito manualmente.</p></section>';
  }
  body+='</div>';page(body,'Cloud','Account e sync',true);
 }
@@ -892,6 +892,21 @@ if(a==='admin-status'){
  return;
 }
 if(a==='push-profile'){try{await sync.upsertProfile(store.profile);store.sync.profileDirty=false;store.sync.lastPushAt=now();await saveStore(store);toast('Profilo sincronizzato ☁️');cloudPage();}catch(e){alert(e.message||e);}return;}
+if(a==='import-local-data'){
+ const userId=cloudState.user?.id;if(!userId)return;
+ const typed=prompt('Questa operazione copierà/mergerà nel tuo account i dati locali non associati presenti su questo dispositivo.\n\nPer continuare scrivi esattamente: IMPORTA');
+ if(typed!=='IMPORTA')return;
+ store=await selectWorkspace(userId,{importGuest:true,markGuestHandled:true});
+ guestDataPending=false;
+ store.sync.ownerId=userId;await saveStore(store);
+ await cloudSync({silent:false});cloudPage();return;
+}
+if(a==='keep-local-separate'){
+ const userId=cloudState.user?.id;if(!userId)return;
+ store=await selectWorkspace(userId,{importGuest:false,markGuestHandled:true});
+ guestDataPending=false;
+ store.sync.ownerId=userId;await saveStore(store);cloudPage();return;
+}
 if(a==='sync-all'){await cloudSync({silent:false});return;}
 
 
