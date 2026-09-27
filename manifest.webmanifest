@@ -7,5 +7,5 @@
   "display":"standalone",
   "background_color":"#020617",
   "theme_color":"#052e16",
-  "icons":[{"src":"./icons/quizlab-monkey-v091.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+  "icons":[{"src":"./icons/quizlab-app-v093.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
 }
