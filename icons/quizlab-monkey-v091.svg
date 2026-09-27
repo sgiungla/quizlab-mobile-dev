@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="QuizLab Sgiungla mascot">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#03111f"/><stop offset="1" stop-color="#07302c"/></linearGradient>
+  <linearGradient id="leaf" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#0f9f6e"/><stop offset=".55" stop-color="#22c55e"/><stop offset="1" stop-color="#a3e635"/></linearGradient>
+  <linearGradient id="fur" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#8b451d"/><stop offset=".55" stop-color="#5b2b18"/><stop offset="1" stop-color="#2d160f"/></linearGradient>
+  <linearGradient id="skin" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffc177"/><stop offset="1" stop-color="#e88c3c"/></linearGradient>
+  <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#22d3ee"/><stop offset="1" stop-color="#0ea5e9"/></linearGradient>
+</defs>
+<rect x="8" y="8" width="496" height="496" rx="104" fill="url(#bg)" stroke="#18d3c0" stroke-width="8"/>
+<g opacity=".95" fill="url(#leaf)">
+  <path d="M38 164c62-8 104-40 128-95-58 13-101 48-128 95Z"/>
+  <path d="M53 239c58-10 104-39 139-91-63 7-111 42-139 91Z"/>
+  <path d="M474 174c-63-6-111-37-142-91 64 10 113 42 142 91Z"/>
+  <path d="M466 252c-58-10-105-38-139-89 62 8 111 41 139 89Z"/>
+</g>
+<g transform="translate(0 10)">
+  <ellipse cx="256" cy="297" rx="132" ry="128" fill="url(#fur)" stroke="#1b0e0a" stroke-width="8"/>
+  <ellipse cx="135" cy="304" rx="45" ry="55" fill="url(#skin)" stroke="#5b2b18" stroke-width="8"/>
+  <ellipse cx="377" cy="304" rx="45" ry="55" fill="url(#skin)" stroke="#5b2b18" stroke-width="8"/>
+  <ellipse cx="256" cy="315" rx="91" ry="88" fill="url(#skin)"/>
+  <path d="M166 270c20-78 161-87 184-2-18-24-48-36-91-35-42 0-73 12-93 37Z" fill="#3a1d13"/>
+  <ellipse cx="256" cy="356" rx="64" ry="48" fill="#f7b66d"/>
+  <path d="M220 374c24 19 49 19 72 0" fill="none" stroke="#5a2e1a" stroke-width="8" stroke-linecap="round"/>
+  <ellipse cx="234" cy="343" rx="7" ry="9" fill="#442013"/><ellipse cx="278" cy="343" rx="7" ry="9" fill="#442013"/>
+  <g>
+    <path d="M157 275c23-14 63-17 89-4l-7 62c-29 9-63 6-83-9Z" fill="#061421" stroke="#22d3ee" stroke-width="7"/>
+    <path d="M266 271c27-12 66-9 89 6l1 48c-22 14-54 16-83 7Z" fill="#061421" stroke="#22d3ee" stroke-width="7"/>
+    <path d="M242 292h28" stroke="#22d3ee" stroke-width="8" stroke-linecap="round"/>
+    <path d="M179 292c14-9 36-10 48-4" stroke="#8ef7ff" stroke-width="5" stroke-linecap="round" opacity=".85"/>
+    <path d="M292 289c15-6 33-5 46 2" stroke="#8ef7ff" stroke-width="5" stroke-linecap="round" opacity=".85"/>
+  </g>
+  <g>
+    <path d="M132 168 256 112l124 56-124 56Z" fill="url(#cyan)" stroke="#b9fbff" stroke-width="7"/>
+    <path d="M177 192v54c0 25 36 44 79 44s79-19 79-44v-54l-79 36Z" fill="#057ca3"/>
+    <path d="M380 170v78" stroke="#facc15" stroke-width="10" stroke-linecap="round"/>
+    <circle cx="380" cy="258" r="12" fill="#facc15"/>
+  </g>
+</g>
+<path d="M83 420c42-17 75-44 97-82-50 14-83 39-97 82Zm346 0c-43-17-76-44-98-82 51 14 84 39 98 82Z" fill="url(#leaf)"/>
+</svg>
