@@ -306,3 +306,35 @@ body{background:
   .mascot-lockup-small span{font-size:8px}
   .mascot-lockup-hero span{font-size:10px}
 }
+
+/* v0.10.2 · exact mascot crop, text stays INSIDE the icon */
+.mascot-lockup span{display:none!important}
+.app-mark{
+  width:66px!important;
+  height:66px!important;
+  padding:0!important;
+  border-radius:17px!important;
+  object-fit:contain!important;
+  object-position:center!important;
+  background:#03111f!important;
+}
+.mobile-hero-mark{
+  width:116px!important;
+  height:116px!important;
+  padding:0!important;
+  border-radius:23px!important;
+  object-fit:contain!important;
+  object-position:center!important;
+  background:#03111f!important;
+}
+.mobile-home-hero:before{
+  background-image:url('./assets/jungle-sidebar-mascot.webp')!important;
+  background-size:contain!important;
+  background-repeat:no-repeat!important;
+  background-position:right center!important;
+  opacity:.13!important;
+}
+@media(max-width:560px){
+  .app-mark{width:62px!important;height:62px!important}
+  .mobile-hero-mark{width:108px!important;height:108px!important}
+}
