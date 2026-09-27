@@ -162,7 +162,13 @@ export async function selectWorkspace(userId,{importGuest=false,markGuestHandled
   const c=shapeContainer(await readRaw());
   const key=userId?'user:'+userId:'guest';
   if(!c.workspaces[key])c.workspaces[key]=emptyStore();
-  if(userId&&importGuest)c.workspaces[key]=mergeWorkspace(c.workspaces[key],c.workspaces.guest);
+  if(userId&&importGuest){
+    const guestIds=Object.keys(c.workspaces.guest?.courses||{});
+    c.workspaces[key]=mergeWorkspace(c.workspaces[key],c.workspaces.guest);
+    c.workspaces[key].sync.dirtyCourseIds=[...new Set([...(c.workspaces[key].sync.dirtyCourseIds||[]),...guestIds])];
+    c.workspaces[key].sync.dirtyBankCourseIds=[...new Set([...(c.workspaces[key].sync.dirtyBankCourseIds||[]),...guestIds])];
+    c.workspaces[key].sync.lastLocalChangeAt=new Date().toISOString();
+  }
   if(userId&&markGuestHandled){
     c.meta.guestHandledByUser={...(c.meta.guestHandledByUser||{}),[userId]:c.meta.guestDirtyAt||new Date().toISOString()};
   }
