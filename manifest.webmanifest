@@ -1,13 +1,16 @@
 {
+  "id":"./",
   "name":"QuizLab · Sgiungla",
-  "short_name":"QuizLab Sgiungla",
+  "short_name":"QuizLab",
   "description":"QuizLab offline-first per studiare nella Sgiungla universitaria.",
   "start_url":"./",
   "scope":"./",
   "display":"standalone",
   "background_color":"#020617",
   "theme_color":"#052e16",
+  "prefer_related_applications":false,
   "icons":[
-    {"src":"./icons/quizlab-sgiungla-final-192.jpg","sizes":"192x192","type":"image/jpeg","purpose":"any"}
+    {"src":"./icons/quizlab-sgiungla-final-192.jpg","sizes":"192x192","type":"image/jpeg","purpose":"any"},
+    {"src":"./icons/quizlab-sgiungla-final-192.jpg","sizes":"512x512","type":"image/jpeg","purpose":"any"}
   ]
 }
