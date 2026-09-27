@@ -138,3 +138,5 @@
 .admin-details summary{cursor:pointer;color:#bae6fd;font-weight:800}
 .admin-course-list{display:grid;gap:8px;margin-top:10px}
 .admin-course{padding:10px;border:1px solid #263244;border-radius:12px;background:#0f172a}
+
+.brand-lockup{display:flex;align-items:center;gap:9px;min-width:0}.app-mark{width:34px;height:34px;border-radius:10px;object-fit:cover;flex:none;box-shadow:0 6px 18px rgba(34,211,238,.15)}@media(max-width:520px){.app-mark{width:30px;height:30px}.brand-lockup{gap:7px}}
