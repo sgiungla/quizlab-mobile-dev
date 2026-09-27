@@ -76,14 +76,16 @@ function refreshSyncBadge(){
 }
 
 
-function emptyCourse(subject=''){return {subject:norm(subject),officialBank:[],aiBank:[],topicMap:null,aiWorkflow:{},attempts:[],exams:[],marked:[],pendingReview:[],historicalWrong:[],fullCampaign:{signature:'all',seenIds:[],resetAt:null},syncMeta:{version:2,performanceResetAt:null,reviewResetAt:null,markedState:{},pendingState:{},historicalWrongAt:{},fullSeenAt:{}},createdAt:now(),updatedAt:now()};}
+function emptyCourse(subject=''){return {subject:norm(subject),officialBank:[],aiBank:[],topicMap:null,aiWorkflow:{},attempts:[],exams:[],marked:[],pendingReview:[],historicalWrong:[],fullCampaign:{signature:'all',seenIds:[],resetAt:null},syncMeta:{version:3,performanceResetAt:null,examResetAt:null,reviewResetAt:null,removedQuestionAt:{},markedState:{},pendingState:{},historicalWrongAt:{},fullSeenAt:{}},createdAt:now(),updatedAt:now()};}
 function ensureCourseSyncMeta(c){
  const baseAt=c.updatedAt||c.createdAt||'1970-01-01T00:00:00.000Z';
  const raw=c.syncMeta&&typeof c.syncMeta==='object'?c.syncMeta:{};
  c.syncMeta={
-  version:2,
+  version:3,
   performanceResetAt:raw.performanceResetAt||null,
+  examResetAt:raw.examResetAt||null,
   reviewResetAt:raw.reviewResetAt||null,
+  removedQuestionAt:raw.removedQuestionAt&&typeof raw.removedQuestionAt==='object'?{...raw.removedQuestionAt}:{},
   markedState:raw.markedState&&typeof raw.markedState==='object'?{...raw.markedState}:{},
   pendingState:raw.pendingState&&typeof raw.pendingState==='object'?{...raw.pendingState}:{},
   historicalWrongAt:raw.historicalWrongAt&&typeof raw.historicalWrongAt==='object'?{...raw.historicalWrongAt}:{},
