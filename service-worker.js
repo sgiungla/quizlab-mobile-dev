@@ -1,4 +1,4 @@
-const CACHE='quizlab-mobile-dev-v0.10.15';
+const CACHE='quizlab-mobile-dev-v0.10.16';
 const ASSETS=['./','./index.html','./styles.css','./app.js','./db.js','./sync-adapter.js','./cloud-config.js','./manifest.webmanifest','./icons/quizlab-sgiungla-192.png','./icons/quizlab-sgiungla-512.png'];
 const CORE=new Set(['index.html','styles.css','app.js','db.js','sync-adapter.js','cloud-config.js','manifest.webmanifest']);
 
