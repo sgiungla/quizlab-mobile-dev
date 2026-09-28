@@ -4,7 +4,7 @@ import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
 
 const BANK_SCHEMA='unisgiunglalab.quizlab.bank';
 const BACKUP_SCHEMA='unisgiunglalab.quizlab.backup';
-const APP_VERSION='0.10.10';
+const APP_VERSION='0.10.11';
 const sync=new QuizLabSyncAdapter();
 const app=document.getElementById('app');
 const picker=document.getElementById('filePicker');
@@ -519,6 +519,10 @@ async function cloudSync({silent=true}={}){
  }
  if(accessState.status!=='active'){route.name='access';render();return false;}
  const changeToken=store.sync?.lastLocalChangeAt||null;
+ const uiBefore=Object.entries(store.courses||{}).map(([id,raw])=>{
+  const x=shape(raw);
+  return [id,x.subject,x.officialBank.length,x.aiBank.length,x.updatedAt||''].join('::');
+ }).sort().join('|');
  const dirtyAtStart=[...(store.sync?.dirtyCourseIds||[])];
  const bankDirtyAtStart=[...(store.sync?.dirtyBankCourseIds||[])];
  let changedDuringSync=false;
@@ -550,7 +554,13 @@ async function cloudSync({silent=true}={}){
   store.sync.mode='cloud-online';
   await saveStore(store);
   lastSyncError=false;
+  const uiAfter=Object.entries(store.courses||{}).map(([id,raw])=>{
+   const x=shape(raw);
+   return [id,x.subject,x.officialBank.length,x.aiBank.length,x.updatedAt||''].join('::');
+  }).sort().join('|');
+  const cloudChangedUi=uiAfter!==uiBefore;
   if(!silent){toast('Sincronizzazione completa ☁️');render();}
+  else if(cloudChangedUi&&(route.name==='home'||route.name==='dashboard'))render();
   else refreshSyncBadge();
   return true;
  }catch(e){
