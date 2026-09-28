@@ -4,7 +4,7 @@ import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
 
 const BANK_SCHEMA='unisgiunglalab.quizlab.bank';
 const BACKUP_SCHEMA='unisgiunglalab.quizlab.backup';
-const APP_VERSION='0.10.15';
+const APP_VERSION='0.10.16';
 const sync=new QuizLabSyncAdapter();
 const app=document.getElementById('app');
 const picker=document.getElementById('filePicker');
@@ -69,6 +69,26 @@ function syncBadgeHtml(){
  const m=syncBadgeModel();
  return '<button class="cloud-badge '+m.cls+'" data-action="cloud" data-sync-badge title="'+esc(m.title)+'"><span class="cloud-badge-icon">'+esc(m.icon)+'</span><span>'+esc(m.label)+'</span></button>';
 }
+
+const THEME_KEY='quizlab-theme';
+let currentTheme=(()=>{try{return localStorage.getItem(THEME_KEY)==='light'?'light':'dark';}catch(e){return 'dark';}})();
+function applyTheme(theme=currentTheme){
+ currentTheme=theme==='light'?'light':'dark';
+ document.documentElement.dataset.theme=currentTheme;
+ try{localStorage.setItem(THEME_KEY,currentTheme);}catch(e){}
+ const btn=document.querySelector('[data-theme-toggle]');
+ if(btn){
+  btn.setAttribute('aria-pressed',currentTheme==='light'?'true':'false');
+  btn.title=currentTheme==='light'?'Passa al tema scuro':'Passa al tema chiaro';
+  const label=btn.querySelector('.theme-toggle-label');if(label)label.textContent=currentTheme==='light'?'Chiaro':'Scuro';
+ }
+}
+function themeToggleHtml(){
+ const light=currentTheme==='light';
+ return '<button class="theme-toggle" data-action="toggle-theme" data-theme-toggle aria-label="Cambia tema" aria-pressed="'+(light?'true':'false')+'" title="'+(light?'Passa al tema scuro':'Passa al tema chiaro')+'"><span class="theme-toggle-track"><span class="theme-toggle-knob"></span></span><span class="theme-toggle-label">'+(light?'Chiaro':'Scuro')+'</span></button>';
+}
+applyTheme(currentTheme);
+
 function refreshSyncBadge(){
  const el=document.querySelector('[data-sync-badge]');
  if(!el)return;
@@ -178,7 +198,7 @@ function chapterBadge(x){
 
 function top(title,sub,back){
  const adminAlert=accessState.isAdmin&&adminPendingCount>0?'<button class="admin-alert" data-action="open-admin" title="Richieste di accesso in attesa">🛡️ '+adminPendingCount+'</button>':'';
- return '<header class="topbar"><div class="topbar-row">'+(back?'<button class="icon-btn" data-action="back">←</button>':'')+'<div class="brand-lockup"><img class="app-mark" src="./icons/quizlab-sgiungla-192.png" alt="QuizLab Sgiungla"><div class="brand">'+esc(title)+'<small>'+esc(sub||'')+'</small></div></div><div class="spacer"></div>'+adminAlert+'<button class="profile-chip" data-action="profile">'+avatarHtml('tiny')+'<span>'+(store.profile?.displayName?esc(store.profile.displayName.split(' ')[0]):'Profilo')+'</span></button>'+syncBadgeHtml()+'</div></header>';
+ return '<header class="topbar"><div class="topbar-row">'+(back?'<button class="icon-btn" data-action="back">←</button>':'')+'<div class="brand-lockup"><img class="app-mark" src="./icons/quizlab-sgiungla-192.png" alt="QuizLab Sgiungla"><div class="brand">'+esc(title)+'<small>'+esc(sub||'')+'</small></div></div><div class="spacer"></div>'+adminAlert+themeToggleHtml()+'<button class="profile-chip" data-action="profile">'+avatarHtml('tiny')+'<span>'+(store.profile?.displayName?esc(store.profile.displayName.split(' ')[0]):'Profilo')+'</span></button>'+syncBadgeHtml()+'</div></header>';
 }
 function bottomNavHtml(){
  const active=route.name;
@@ -931,6 +951,7 @@ function render(){
 }
 
 app.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b)return;const a=b.dataset.action;
+if(a==='toggle-theme'){applyTheme(currentTheme==='dark'?'light':'dark');return;}
 if(a==='home'){setRoute('home',null);return;}
 if(a==='back'){
  if(route.name==='dashboard'){setRoute('home',null);return;}
