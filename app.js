@@ -4,7 +4,7 @@ import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
 
 const BANK_SCHEMA='unisgiunglalab.quizlab.bank';
 const BACKUP_SCHEMA='unisgiunglalab.quizlab.backup';
-const APP_VERSION='0.10.16';
+const APP_VERSION='0.10.17';
 const sync=new QuizLabSyncAdapter();
 const app=document.getElementById('app');
 const picker=document.getElementById('filePicker');
@@ -76,8 +76,7 @@ function applyTheme(theme=currentTheme){
  currentTheme=theme==='light'?'light':'dark';
  document.documentElement.dataset.theme=currentTheme;
  try{localStorage.setItem(THEME_KEY,currentTheme);}catch(e){}
- const btn=document.querySelector('[data-theme-toggle]');
- if(btn){
+ for(const btn of document.querySelectorAll('[data-theme-toggle]')){
   btn.setAttribute('aria-pressed',currentTheme==='light'?'true':'false');
   btn.title=currentTheme==='light'?'Passa al tema scuro':'Passa al tema chiaro';
   const label=btn.querySelector('.theme-toggle-label');if(label)label.textContent=currentTheme==='light'?'Chiaro':'Scuro';
@@ -198,7 +197,7 @@ function chapterBadge(x){
 
 function top(title,sub,back){
  const adminAlert=accessState.isAdmin&&adminPendingCount>0?'<button class="admin-alert" data-action="open-admin" title="Richieste di accesso in attesa">🛡️ '+adminPendingCount+'</button>':'';
- return '<header class="topbar"><div class="topbar-row">'+(back?'<button class="icon-btn" data-action="back">←</button>':'')+'<div class="brand-lockup"><img class="app-mark" src="./icons/quizlab-sgiungla-192.png" alt="QuizLab Sgiungla"><div class="brand">'+esc(title)+'<small>'+esc(sub||'')+'</small></div></div><div class="spacer"></div>'+adminAlert+themeToggleHtml()+'<button class="profile-chip" data-action="profile">'+avatarHtml('tiny')+'<span>'+(store.profile?.displayName?esc(store.profile.displayName.split(' ')[0]):'Profilo')+'</span></button>'+syncBadgeHtml()+'</div></header>';
+ return '<header class="topbar"><div class="topbar-row">'+(back?'<button class="icon-btn" data-action="back">←</button>':'')+'<div class="brand-lockup"><img class="app-mark" src="./icons/quizlab-sgiungla-192.png" alt="QuizLab Sgiungla"><div class="brand">'+esc(title)+'<small>'+esc(sub||'')+'</small></div></div><div class="spacer"></div>'+adminAlert+'<span class="theme-toggle-topbar">'+themeToggleHtml()+'</span><button class="profile-chip" data-action="profile">'+avatarHtml('tiny')+'<span>'+(store.profile?.displayName?esc(store.profile.displayName.split(' ')[0]):'Profilo')+'</span></button>'+syncBadgeHtml()+'</div></header>';
 }
 function bottomNavHtml(){
  const active=route.name;
@@ -371,7 +370,7 @@ function profilePage(){
  const profileSyncStatus=cloudState.user
   ?(accessState.status==='active'?'Cloud collegato · sincronizzazione attiva':accessState.status==='pending'?'In attesa di approvazione':'Account sospeso')
   :'Solo locale';
- page('<div class="stack"><section class="card hero jungle-hero"><div class="profile-hero">'+avatarHtml('large')+'<div><div class="eyebrow">Identità Sgiungla</div><h1>'+(p.displayName?esc(p.displayName):'Il tuo profilo')+'</h1><p class="subtle">'+esc(profileCloudText)+'</p></div></div></section><section class="card"><h2 class="section-title">Profilo</h2><label>Nome<input id="profileName" maxlength="60" placeholder="Come vuoi essere chiamato" value="'+esc(p.displayName||'')+'"></label><label>Frase Sgiungla<input id="profileMotto" maxlength="120" value="'+esc(p.motto||'La giungla universitaria è sotto controllo.')+'"></label><div class="actions"><button class="btn secondary" data-action="avatar-pick">📷 Cambia foto</button><button class="btn" data-action="save-profile">Salva profilo</button></div><input id="avatarPicker" type="file" accept="image/*" hidden></section><section class="card"><h3 class="section-title">Sincronizzazione</h3><div class="sync-panel"><div><span>Account</span><strong>'+esc(cloudState.user?.email||'—')+'</strong></div><div><span>Dispositivo</span><strong>'+esc(store.sync?.clientId||'—')+'</strong></div><div><span>Stato</span><strong>'+esc(profileSyncStatus)+'</strong></div></div><p class="subtle">Banca e progressi restano separati per account. Un backup desktop importa i dati di studio senza sostituire account, profilo o configurazione cloud.</p></section></div>','Profilo','Sgiungla ID',true);
+ page('<div class="stack"><section class="card hero jungle-hero"><div class="profile-hero">'+avatarHtml('large')+'<div><div class="eyebrow">Identità Sgiungla</div><h1>'+(p.displayName?esc(p.displayName):'Il tuo profilo')+'</h1><p class="subtle">'+esc(profileCloudText)+'</p></div></div></section><section class="card"><h2 class="section-title">Profilo</h2><label>Nome<input id="profileName" maxlength="60" placeholder="Come vuoi essere chiamato" value="'+esc(p.displayName||'')+'"></label><label>Frase Sgiungla<input id="profileMotto" maxlength="120" value="'+esc(p.motto||'La giungla universitaria è sotto controllo.')+'"></label><div class="actions"><button class="btn secondary" data-action="avatar-pick">📷 Cambia foto</button><button class="btn" data-action="save-profile">Salva profilo</button></div><input id="avatarPicker" type="file" accept="image/*" hidden></section><section class="card appearance-card"><div class="eyebrow">Aspetto</div><h3 class="section-title">Tema dell’app</h3><p class="subtle">La scelta resta salvata su questo dispositivo.</p><div class="appearance-row"><div><strong>Tema '+(currentTheme==='light'?'chiaro':'scuro')+'</strong><small>Puoi cambiarlo in qualsiasi momento.</small></div>'+themeToggleHtml()+'</div></section><section class="card"><h3 class="section-title">Sincronizzazione</h3><div class="sync-panel"><div><span>Account</span><strong>'+esc(cloudState.user?.email||'—')+'</strong></div><div><span>Dispositivo</span><strong>'+esc(store.sync?.clientId||'—')+'</strong></div><div><span>Stato</span><strong>'+esc(profileSyncStatus)+'</strong></div></div><p class="subtle">Banca e progressi restano separati per account. Un backup desktop importa i dati di studio senza sostituire account, profilo o configurazione cloud.</p></section></div>','Profilo','Sgiungla ID',true);
  setTimeout(()=>{document.getElementById('avatarPicker')?.addEventListener('change',handleAvatar);},0);
 }
 async function handleAvatar(e){
