@@ -577,10 +577,15 @@ async function startCloud(){
    settings:store.settings||{},
    onAuthChange:async ({event,session,status})=>{
     cloudState={status,user:session?.user||null};
+    store.sync.mode=status;
+    if(event==='TOKEN_REFRESHED'){
+      explicitAuthIntent=false;
+      refreshSyncBadge();
+      return;
+    }
     const explicit=explicitAuthIntent||event==='SIGNED_IN';
     explicitAuthIntent=false;
     await selectWorkspaceForSession(session,{explicit});
-    store.sync.mode=status;
     if(session?.user){
       try{await sync.ensurePendingRegistration();}catch(e){console.warn('Pending registration',e);}
       try{accessState=await sync.accessState();}catch(e){accessState={status:'active',isAdmin:false,legacy:true};console.warn('Access state',e);}
