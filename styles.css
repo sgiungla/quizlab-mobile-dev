@@ -360,3 +360,24 @@ body{background:
   .app-mark{width:68px!important;height:68px!important}
   .mobile-hero-mark{width:120px!important;height:120px!important}
 }
+
+/* v0.10.4 FINAL verified QuizLab Sgiungla mascot */
+.app-mark{
+  width:72px!important;height:72px!important;padding:0!important;
+  object-fit:contain!important;object-position:center!important;
+  border-radius:18px!important;background:#03111f!important;
+}
+.mobile-hero-mark{
+  width:128px!important;height:128px!important;padding:0!important;
+  object-fit:contain!important;object-position:center!important;
+  border-radius:24px!important;background:#03111f!important;
+}
+.mobile-home-hero:before{
+  background-image:url('./icons/quizlab-sgiungla-512.png')!important;
+  background-size:contain!important;background-repeat:no-repeat!important;
+  background-position:right center!important;opacity:.12!important;
+}
+@media(max-width:560px){
+ .app-mark{width:68px!important;height:68px!important}
+ .mobile-hero-mark{width:120px!important;height:120px!important}
+}
