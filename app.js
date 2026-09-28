@@ -190,10 +190,18 @@ function setRoute(name,courseId=route.courseId){if(examTimer){clearInterval(exam
 function home(){
  const rows=Object.entries(store.courses||{}).map(([id,c])=>[id,shape(c)]).filter(([,c])=>qbank(c).length||c.attempts.length).sort((a,b)=>a[1].subject.localeCompare(b[1].subject));
  const p=store.profile||{};
+ const configured=sync.configured(store.settings||{})||sync.configured(DEFAULT_CLOUD_CONFIG||{});
  let html='<div class="stack"><section class="card hero jungle-hero mobile-home-hero"><div class="mobile-brand-row"><img src="./icons/quizlab-sgiungla-192.png" class="mobile-hero-mark" alt="QuizLab Sgiungla"><div><div class="eyebrow">QuizLab · Sgiungla Edition</div><h1>'+(p.displayName?'Ciao, '+esc(p.displayName.split(' ')[0])+' 👋':'Benvenuto nella Sgiungla 🌴')+'</h1><p class="jungle-line">'+esc(p.motto||'La giungla universitaria è sotto controllo.')+'</p></div>'+avatarHtml('large')+'</div><div class="hero-pills"><span>🌿 Multi-materia</span><span>☁️ Cloud</span><span>🧠 AI + spiegazioni</span></div><div class="actions hero-actions"><button class="btn" data-action="import">📥 Importa</button><button class="btn secondary" data-action="backup" '+(rows.length?'':'disabled')+'>💾 Backup</button><button class="btn ghost" data-action="profile">👤 Profilo</button></div></section>';
+ if(!cloudState.user){
+  if(configured){
+   html+='<section class="card"><div class="eyebrow">Account QuizLab</div><h2 class="section-title">Accedi</h2><p class="subtle">Collega il tuo account per ritrovare materie, progressi e profilo sui tuoi dispositivi.</p><label>Email<input id="authEmail" type="email" autocomplete="email"></label><label>Password<input id="authPassword" type="password" autocomplete="current-password" minlength="8"></label><div class="actions"><button class="btn" data-action="sign-in">Accedi</button><button class="btn secondary" data-action="sign-up">Crea account</button></div></section>';
+  }else{
+   html+='<section class="card"><h2 class="section-title">Cloud non disponibile</h2><p class="subtle">La configurazione cloud della build non è completa.</p></section>';
+  }
+ }
  if(!rows.length)html+='<section class="card empty"><strong>Nessuna materia.</strong><p>Importa il JSON “banca COMPLETA” esportato dal desktop.</p></section>';
  for(const [id,c] of rows){const m=metrics(c);html+='<section class="card course-card"><div class="eyebrow">Materia</div><div class="subject-name">'+esc(c.subject||id)+'</div><div class="bank-total"><span>Domande in banca</span><strong>'+m.total+'</strong></div><div class="pill-row"><span class="pill off">'+m.official+' ufficiali</span><span class="pill ai">'+m.ai+' AI</span><span class="pill">'+m.attempted+' affrontate</span></div><div class="stats"><div class="stat"><span>Copertura</span><strong>'+pct(m.coverage)+'</strong></div><div class="stat"><span>Accuratezza</span><strong>'+pct(m.accuracy)+'</strong></div></div><div class="actions"><button class="btn" data-action="open" data-id="'+esc(id)+'">Apri materia →</button><button class="btn secondary" data-action="export" data-id="'+esc(id)+'">Esporta</button></div></section>';}
- html+='<section class="card"><h3 class="section-title">Sincronizzazione</h3><p class="subtle">'+(cloudState.user?'Cloud collegato · sincronizzazione automatica attiva. I progressi restano disponibili anche offline.':'Questa DEV continua a funzionare in locale; puoi collegare il cloud dal pulsante in alto.')+'</p></section></div>';
+ html+='<section class="card"><h3 class="section-title">Sincronizzazione</h3><p class="subtle">'+(cloudState.user?'Cloud collegato · sincronizzazione automatica attiva. I progressi restano disponibili anche offline.':'Puoi continuare a usare QuizLab in locale oppure accedere qui sopra per attivare la sincronizzazione cloud.')+'</p></section></div>';
  page(html);
 }
 
@@ -380,7 +388,7 @@ async function selectWorkspaceForSession(authSession,{explicit=false}={}){
   cloudState={status:'cloud-ready',user:null};
   accessState={status:'active',isAdmin:false,legacy:true};
   guestDataPending=false;
-  route={name:'cloud',courseId:null};
+  route={name:'home',courseId:null};
   globalThis.__quizlabSessionReset=Date.now();
   session=null;
   return;
@@ -584,7 +592,7 @@ async function startCloud(){
       }else{
         route.name='access';
       }
-    }else if(sync.configured(store.settings||{}))route.name='cloud';
+    }else if(sync.configured(store.settings||{}))route.name='home';
     render();
    }
   });
@@ -679,7 +687,7 @@ function cloudPage(){
  if(!configured){
   body+='<section class="card"><h2 class="section-title">Cloud non disponibile</h2><p class="subtle">La configurazione cloud della build non è completa. Un utente normale non deve inserire URL o chiavi tecniche.</p></section>';
  }else if(!user){
-  body+='<section class="card"><h2 class="section-title">Account</h2><label>Email<input id="authEmail" type="email" autocomplete="email"></label><label>Password<input id="authPassword" type="password" autocomplete="current-password" minlength="8"></label><div class="actions"><button class="btn" data-action="sign-in">Accedi</button><button class="btn secondary" data-action="sign-up">Crea account</button></div><button class="btn ghost" data-action="reset-cloud-config">Cambia configurazione cloud</button></section>';
+  body+='<section class="card"><h2 class="section-title">Account</h2><p class="subtle">L’accesso è ora nella pagina principale, così lo trovi subito all’apertura di QuizLab.</p><div class="actions"><button class="btn" data-action="home">Vai alla Home</button></div></section>';
  }else{
   body+='<section class="card"><h2 class="section-title">Sincronizzazione</h2><div class="sync-panel"><div><span>Account</span><strong>'+esc(user.email||user.id)+'</strong></div><div><span>Stato</span><strong>'+esc(syncBadgeModel().label)+'</strong></div><div><span>Ultima sincronizzazione</span><strong>'+esc(fmtSyncAgo(store.sync?.lastPullAt||store.sync?.lastPushAt)||'non ancora completata')+'</strong></div><div><span>Dati locali da sincronizzare</span><strong>'+((store.sync?.dirtyCourseIds||[]).length)+' materie</strong></div></div>'+(guestDataPending?'<div class="local-data-notice"><strong>🗂️ Dati locali non associati rilevati</strong><p class="subtle">Per sicurezza non sono stati collegati automaticamente a questo account.</p><div class="actions"><button class="btn secondary" data-action="keep-local-separate">Mantieni separati</button><button class="btn" data-action="import-local-data">Importa dati locali</button></div></div>':'')+'<div class="actions"><button class="btn" data-action="sync-all">Sincronizza tutto</button><button class="btn secondary" data-action="push-profile">Sincronizza profilo</button>'+(accessState.isAdmin?'<button class="btn secondary" data-action="open-admin">🛡️ Admin'+(adminPendingCount?' · '+adminPendingCount:'')+'</button>':'')+'<button class="btn ghost" data-action="sign-out">Esci</button></div><p class="subtle">La sincronizzazione è automatica. Il pulsante serve solo per forzarla subito manualmente.</p></section>';
  }
