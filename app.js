@@ -4,7 +4,7 @@ import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
 
 const BANK_SCHEMA='unisgiunglalab.quizlab.bank';
 const BACKUP_SCHEMA='unisgiunglalab.quizlab.backup';
-const APP_VERSION='0.10.14';
+const APP_VERSION='0.10.15';
 const sync=new QuizLabSyncAdapter();
 const app=document.getElementById('app');
 const picker=document.getElementById('filePicker');
@@ -460,12 +460,18 @@ function mergeQuestionRows(localRows=[],remoteRows=[],preferRemote=true){
  for(const q of second||[])if(q?.id)out.set(q.id,{...(out.get(q.id)||{}),...q});
  return [...out.values()];
 }
-function mergeRemoteCourses(rows=[],{mergeBanks=false}={}){
+function mergeRemoteCourses(rows=[],{mergeBanks=false,mergeProgressState=false}={}){
  const hidden=new Set(store.sync?.hiddenCourseIds||[]);
  for(const remote of rows){
   if(hidden.has(remote.courseId))continue;
   const local=shape(store.courses[remote.courseId]||emptyCourse(remote.subject||remote.courseId));
-  const bank=remote.bank||{},progress=remote.progress||{};
+  const bank=remote.bank||{},remoteProgress=remote.progress||{};
+  // A manual full refresh is allowed while local progress is still dirty.
+  // In that case never replace local progress with the older cloud snapshot:
+  // merge event/state metadata first, then the normal push can publish the union.
+  const progress=mergeProgressState
+    ? sync.mergeProgress(sync.progressPayload(local),remoteProgress)
+    : remoteProgress;
   const remoteOfficial=Array.isArray(bank.officialBank)?bank.officialBank:null;
   const remoteAi=Array.isArray(bank.aiBank)?bank.aiBank:null;
   store.courses[remote.courseId]=shape({
@@ -608,7 +614,7 @@ async function forceCloudPullAll(){
   // Manual "Sincronizza tutto" is a recovery/full-refresh operation:
   // hydrate cloud banks first and merge question banks so a stale/empty local
   // copy can never hide a newer cloud bank. Local-only questions are preserved.
-  mergeRemoteCourses(rows,{mergeBanks:true});
+  mergeRemoteCourses(rows,{mergeBanks:true,mergeProgressState:true});
 
   // A course that has just been hydrated from the cloud must not remain marked
   // as a stale local bank waiting to overwrite that same cloud bank.
