@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "icons/quizlab-sgiungla-monkey-192.png"
+      - "icons/quizlab-sgiungla-final-192.jpg"
       - ".github/workflows/build-pwa-icons.yml"
   workflow_dispatch:
 
@@ -18,29 +18,60 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-      - name: Build 512 icon from verified 192 PNG
+
+      - name: Build verified QuizLab Sgiungla icons
         run: |
           python -m pip install --quiet pillow
           python - <<'PY'
-          from PIL import Image
-          src = Image.open("icons/quizlab-sgiungla-monkey-192.png").convert("RGBA")
-          if src.size != (192,192):
-              raise SystemExit(f"Unexpected source size: {src.size}")
+          from PIL import Image, ImageFont, ImageDraw, ImageFile
+          import hashlib
+
+          ImageFile.LOAD_TRUNCATED_IMAGES = True
+          src = Image.open("icons/quizlab-sgiungla-final-192.jpg").convert("RGB")
           src.load()
-          im = src.resize((512,512), Image.Resampling.LANCZOS)
-          im.save("icons/quizlab-sgiungla-monkey-512.png", optimize=True)
+
+          if src.size != (192, 192):
+              raise SystemExit(f"Unexpected source size: {src.size}")
+
+          font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+          for size in (192, 512):
+              canvas = Image.new("RGB", (size, size), "#03111f")
+              art_size = round(size * 0.86)
+              art = src.resize((art_size, art_size), Image.Resampling.LANCZOS)
+              x = (size - art_size) // 2
+              y = round(size * 0.01)
+              canvas.paste(art, (x, y))
+
+              draw = ImageDraw.Draw(canvas)
+              font_size = max(13, round(size * 0.082))
+              font = ImageFont.truetype(font_path, font_size)
+              label = "SGIUNGLA"
+              box = draw.textbbox((0,0), label, font=font)
+              tw = box[2] - box[0]
+              tx = (size - tw) // 2
+              ty = size - font_size - round(size * 0.035)
+              draw.text((tx, ty), label, font=font, fill="#50f27c",
+                        stroke_width=max(1, size//256), stroke_fill="#03111f")
+
+              out = f"icons/quizlab-sgiungla-brand-{size}.png"
+              canvas.save(out, optimize=True)
+              with open(out, "rb") as f:
+                  print(out, Image.open(out).size, hashlib.sha256(f.read()).hexdigest())
           PY
-      - name: Commit generated 512 icon
+
+      - name: Commit generated icons
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add icons/quizlab-sgiungla-monkey-512.png
+          git add icons/quizlab-sgiungla-brand-192.png icons/quizlab-sgiungla-brand-512.png
           if git diff --cached --quiet; then
-            echo "512 icon already up to date."
+            echo "Icons already up to date."
           else
-            git commit -m "Regenerate 512 PWA icon from verified mascot PNG"
+            git commit -m "Generate verified QuizLab Sgiungla PWA icons"
             git push
           fi
