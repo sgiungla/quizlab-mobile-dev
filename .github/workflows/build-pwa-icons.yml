@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "icons/quizlab-sgiungla-final-192.jpg"
+      - "icons/quizlab-sgiungla-monkey-192.jpg"
       - ".github/workflows/build-pwa-icons.yml"
   workflow_dispatch:
 
@@ -21,13 +21,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-      - name: Generate exact Sgiungla mascot PWA icons
+      - name: Generate Sgiungla mascot PWA icons
         run: |
           python -m pip install --quiet pillow
           python - <<'PY'
           from PIL import Image, ImageFile
           ImageFile.LOAD_TRUNCATED_IMAGES = True
-          src = Image.open("assets/jungle-sidebar-mascot.webp").convert("RGB")
+          src = Image.open("icons/quizlab-sgiungla-monkey-192.jpg").convert("RGB")
           for size in (192, 512):
               im = src.resize((size, size), Image.Resampling.LANCZOS)
               im.save(f"icons/quizlab-sgiungla-monkey-{size}.png", optimize=True)
@@ -40,6 +40,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "Icons already up to date."
           else
-            git commit -m "Generate exact Sgiungla monkey PWA icons"
+            git commit -m "Generate Sgiungla monkey PWA icons"
             git push
           fi
