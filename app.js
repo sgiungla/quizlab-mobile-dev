@@ -4,7 +4,7 @@ import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
 
 const BANK_SCHEMA='unisgiunglalab.quizlab.bank';
 const BACKUP_SCHEMA='unisgiunglalab.quizlab.backup';
-const APP_VERSION='0.10.11';
+const APP_VERSION='0.10.12';
 const sync=new QuizLabSyncAdapter();
 const app=document.getElementById('app');
 const picker=document.getElementById('filePicker');
@@ -1035,5 +1035,14 @@ if(a==='study-search'){startSession(searchMatches(),'Studio risultati','study');
 
 picker.addEventListener('change',async()=>{const f=picker.files?.[0];if(!f)return;try{const msg=await importPack(JSON.parse(await f.text()));toast('Importazione OK · '+msg);render();}catch(e){alert('Importazione non riuscita:\n'+(e?.message||e));}});
 
-async function init(){store=await loadStore();if(!store.courses||typeof store.courses!=='object')store=emptyStore();for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await applyDefaultCloudConfig();await startCloud();if(!cloudState.user&&sync.configured(store.settings||{}))route.name='home';window.addEventListener('online',async()=>{const gate=await refreshAccessGate({renderBlocked:false});if(gate.status==='active')await cloudSync({silent:true});else render();});window.addEventListener('focus',async()=>{const before=accessState.status;const gate=await refreshAccessGate({renderBlocked:false});if(gate.status==='active'&&cloudState.user)await cloudSync({silent:true});if(accessState.isAdmin)await refreshAdminPending();if(before!==gate.status)render();else refreshSyncBadge();});document.addEventListener('visibilitychange',async()=>{if(document.visibilityState==='visible'){const before=accessState.status;const gate=await refreshAccessGate({renderBlocked:false});if(gate.status==='active'&&cloudState.user)await cloudSync({silent:true});if(accessState.isAdmin)await refreshAdminPending();if(before!==gate.status)render();else refreshSyncBadge();}});setInterval(()=>{if(document.visibilityState==='visible'&&cloudState.user&&accessState.status==='active')cloudSync({silent:true});},45000);render();if('serviceWorker'in navigator)try{const reg=await navigator.serviceWorker.register('./service-worker.js');await reg.update();}catch(e){console.warn(e);}}
+async function init(){store=await loadStore();if(!store.courses||typeof store.courses!=='object')store=emptyStore();for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await applyDefaultCloudConfig();await startCloud();if(!cloudState.user&&sync.configured(store.settings||{}))route.name='home';window.addEventListener('online',async()=>{const gate=await refreshAccessGate({renderBlocked:false});if(gate.status==='active')await cloudSync({silent:true});else render();});window.addEventListener('focus',async()=>{const before=accessState.status;const gate=await refreshAccessGate({renderBlocked:false});if(gate.status==='active'&&cloudState.user)await cloudSync({silent:true});if(accessState.isAdmin)await refreshAdminPending();if(before!==gate.status)render();else refreshSyncBadge();});document.addEventListener('visibilitychange',async()=>{if(document.visibilityState==='visible'){const before=accessState.status;const gate=await refreshAccessGate({renderBlocked:false});if(gate.status==='active'&&cloudState.user)await cloudSync({silent:true});if(accessState.isAdmin)await refreshAdminPending();if(before!==gate.status)render();else refreshSyncBadge();}});setInterval(()=>{if(document.visibilityState==='visible'&&cloudState.user&&accessState.status==='active')cloudSync({silent:true});},45000);render();if('serviceWorker'in navigator)try{
+ let reloadingForUpdate=false;
+ navigator.serviceWorker.addEventListener('controllerchange',()=>{
+  if(reloadingForUpdate)return;
+  reloadingForUpdate=true;
+  location.reload();
+ });
+ const reg=await navigator.serviceWorker.register('./service-worker.js');
+ await reg.update();
+}catch(e){console.warn(e);}}
 init().catch(e=>{app.innerHTML='<main class="main"><section class="card"><h2>Errore avvio</h2><p>'+esc(e?.message||e)+'</p></section></main>';});
