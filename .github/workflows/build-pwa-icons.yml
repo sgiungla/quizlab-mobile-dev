@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "icons/quizlab-sgiungla-monkey-192.jpg"
+      - "icons/quizlab-sgiungla-monkey-192.png"
       - ".github/workflows/build-pwa-icons.yml"
   workflow_dispatch:
 
@@ -21,25 +21,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-      - name: Generate Sgiungla mascot PWA icons
+      - name: Build 512 icon from verified 192 PNG
         run: |
           python -m pip install --quiet pillow
           python - <<'PY'
-          from PIL import Image, ImageFile
-          ImageFile.LOAD_TRUNCATED_IMAGES = True
-          src = Image.open("icons/quizlab-sgiungla-monkey-192.jpg").convert("RGB")
-          for size in (192, 512):
-              im = src.resize((size, size), Image.Resampling.LANCZOS)
-              im.save(f"icons/quizlab-sgiungla-monkey-{size}.png", optimize=True)
+          from PIL import Image
+          src = Image.open("icons/quizlab-sgiungla-monkey-192.png").convert("RGBA")
+          if src.size != (192,192):
+              raise SystemExit(f"Unexpected source size: {src.size}")
+          src.load()
+          im = src.resize((512,512), Image.Resampling.LANCZOS)
+          im.save("icons/quizlab-sgiungla-monkey-512.png", optimize=True)
           PY
-      - name: Commit generated icons
+      - name: Commit generated 512 icon
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add icons/quizlab-sgiungla-monkey-192.png icons/quizlab-sgiungla-monkey-512.png
+          git add icons/quizlab-sgiungla-monkey-512.png
           if git diff --cached --quiet; then
-            echo "Icons already up to date."
+            echo "512 icon already up to date."
           else
-            git commit -m "Generate Sgiungla monkey PWA icons"
+            git commit -m "Regenerate 512 PWA icon from verified mascot PNG"
             git push
           fi
