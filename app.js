@@ -4,7 +4,7 @@ import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
 
 const BANK_SCHEMA='unisgiunglalab.quizlab.bank';
 const BACKUP_SCHEMA='unisgiunglalab.quizlab.backup';
-const APP_VERSION='0.10.9';
+const APP_VERSION='0.10.10';
 const sync=new QuizLabSyncAdapter();
 const app=document.getElementById('app');
 const picker=document.getElementById('filePicker');
@@ -452,17 +452,27 @@ function applyConfirmedPushProgress(items=[]){
  }
 }
 
-function mergeRemoteCourses(rows=[]){
+function mergeQuestionRows(localRows=[],remoteRows=[],preferRemote=true){
+ const out=new Map();
+ const first=preferRemote?localRows:remoteRows;
+ const second=preferRemote?remoteRows:localRows;
+ for(const q of first||[])if(q?.id)out.set(q.id,q);
+ for(const q of second||[])if(q?.id)out.set(q.id,{...(out.get(q.id)||{}),...q});
+ return [...out.values()];
+}
+function mergeRemoteCourses(rows=[],{mergeBanks=false}={}){
  const hidden=new Set(store.sync?.hiddenCourseIds||[]);
  for(const remote of rows){
   if(hidden.has(remote.courseId))continue;
   const local=shape(store.courses[remote.courseId]||emptyCourse(remote.subject||remote.courseId));
   const bank=remote.bank||{},progress=remote.progress||{};
+  const remoteOfficial=Array.isArray(bank.officialBank)?bank.officialBank:null;
+  const remoteAi=Array.isArray(bank.aiBank)?bank.aiBank:null;
   store.courses[remote.courseId]=shape({
     ...local,
     subject:remote.subject||local.subject,
-    officialBank:Array.isArray(bank.officialBank)?bank.officialBank:local.officialBank,
-    aiBank:Array.isArray(bank.aiBank)?bank.aiBank:local.aiBank,
+    officialBank:remoteOfficial?(mergeBanks?mergeQuestionRows(local.officialBank,remoteOfficial,true):remoteOfficial):local.officialBank,
+    aiBank:remoteAi?(mergeBanks?mergeQuestionRows(local.aiBank,remoteAi,true):remoteAi):local.aiBank,
     topicMap:bank.topicMap??local.topicMap,
     aiWorkflow:bank.aiWorkflow||local.aiWorkflow,
     attempts:Array.isArray(progress.attempts)?progress.attempts:local.attempts,
@@ -569,36 +579,49 @@ async function forceCloudPullAll(){
  if(!cloudState.user){toast('Collega prima il tuo account cloud');return false;}
  if(!navigator.onLine){toast('Sei offline: impossibile leggere il cloud');return false;}
  if(syncInFlight){
-  toast('Sincronizzazione già in corso · riprova tra un attimo ☁️');
+  syncQueuedManual=true;
+  toast('Sincronizzazione già in corso · aggiorno dal cloud appena termina ☁️');
   return false;
  }
- store.sync=store.sync||{};
- // Manual full sync means: forget device-only hidden courses, finish any pending push,
- // then perform an explicit unfiltered pull from the cloud and hydrate this device.
- store.sync.hiddenCourseIds=[];
- await saveStore(store);
- const ok=await cloudSync({silent:true});
- if(!ok&&lastSyncError){
-  alert('Sincronizzazione non riuscita. Controlla la connessione e riprova.');
-  return false;
- }
+ syncInFlight=true;lastSyncError=false;refreshSyncBadge();
  try{
+  store.sync=store.sync||{};
+  store.sync.hiddenCourseIds=[];
   const pull=await sync.pullChanges({clientId:store.sync?.clientId});
   const rows=Array.isArray(pull?.courses)?pull.courses:[];
-  mergeRemoteCourses(rows);
+  const remoteIds=new Set(rows.map(x=>x?.courseId).filter(Boolean));
+
+  // Manual "Sincronizza tutto" is a recovery/full-refresh operation:
+  // hydrate cloud banks first and merge question banks so a stale/empty local
+  // copy can never hide a newer cloud bank. Local-only questions are preserved.
+  mergeRemoteCourses(rows,{mergeBanks:true});
+
+  // A course that has just been hydrated from the cloud must not remain marked
+  // as a stale local bank waiting to overwrite that same cloud bank.
+  store.sync.dirtyBankCourseIds=(store.sync.dirtyBankCourseIds||[]).filter(id=>!remoteIds.has(id));
   store.sync.lastPullAt=now();
   store.sync.mode='cloud-online';
   await saveStore(store);
+
+  // Progress/local-only changes can still be pushed after the bank hydration.
+  const progressDirty=(store.sync.dirtyCourseIds||[]).length>0;
+  syncInFlight=false;
+  refreshSyncBadge();
+  if(progressDirty)await cloudSync({silent:true});
+
   lastSyncError=false;
-  const localCount=Object.keys(store.courses||{}).length;
-  toast('Cloud letto: '+rows.length+' materie · presenti sul dispositivo: '+localCount+' ☁️');
+  const visibleCount=Object.values(store.courses||{}).filter(x=>qbank(shape(x)).length||shape(x).attempts.length).length;
+  toast('Cloud letto: '+rows.length+' materie · visibili: '+visibleCount+' ☁️');
   render();
   return true;
  }catch(e){
   lastSyncError=true;
-  refreshSyncBadge();
+  console.warn('Full cloud pull',e);
   alert('Lettura completa del cloud non riuscita:\n'+(e?.message||e));
   return false;
+ }finally{
+  syncInFlight=false;
+  refreshSyncBadge();
  }
 }
 
