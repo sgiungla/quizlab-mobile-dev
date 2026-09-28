@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "assets/jungle-sidebar-mascot.webp"
+      - "icons/quizlab-sgiungla-final-192.jpg"
       - ".github/workflows/build-pwa-icons.yml"
   workflow_dispatch:
 
@@ -25,12 +25,11 @@ jobs:
         run: |
           python -m pip install --quiet pillow
           python - <<'PY'
-          from PIL import Image
+          from PIL import Image, ImageFile
+          ImageFile.LOAD_TRUNCATED_IMAGES = True
           src = Image.open("assets/jungle-sidebar-mascot.webp").convert("RGB")
-          # Square crop chosen to keep hat + monkey + QuizLab + SGIUNGLA all INSIDE the icon.
-          crop = src.crop((0, 190, 352, 542))
           for size in (192, 512):
-              im = crop.resize((size, size), Image.Resampling.LANCZOS)
+              im = src.resize((size, size), Image.Resampling.LANCZOS)
               im.save(f"icons/quizlab-sgiungla-monkey-{size}.png", optimize=True)
           PY
       - name: Commit generated icons
