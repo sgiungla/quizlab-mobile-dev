@@ -4,7 +4,7 @@ import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
 
 const BANK_SCHEMA='unisgiunglalab.quizlab.bank';
 const BACKUP_SCHEMA='unisgiunglalab.quizlab.backup';
-const APP_VERSION='0.10.12';
+const APP_VERSION='0.10.13';
 const sync=new QuizLabSyncAdapter();
 const app=document.getElementById('app');
 const picker=document.getElementById('filePicker');
@@ -756,6 +756,29 @@ function adminPage(){
  }).join('');
  page('<div class="stack"><section class="card hero jungle-hero"><div class="eyebrow">Amministrazione</div><h1>Cabina di controllo 🌴</h1><div class="stats"><div class="stat"><span>In attesa</span><strong>'+pending+'</strong></div><div class="stat"><span>Attivi</span><strong>'+active+'</strong></div><div class="stat"><span>Sospesi</span><strong>'+suspended+'</strong></div><div class="stat"><span>Utenti</span><strong>'+users.length+'</strong></div></div></section><section class="card"><div class="section-head"><div><div class="eyebrow">Cloud</div><h3 class="section-title">Spazio occupato</h3></div><button class="btn ghost compact-btn" data-action="admin-refresh">Aggiorna</button></div><div class="stats"><div class="stat"><span>Database</span><strong>'+fmtBytes(storage.database_bytes)+'</strong></div><div class="stat"><span>Banche JSON</span><strong>'+fmtBytes(storage.banks_json_bytes)+'</strong></div><div class="stat"><span>Progressi JSON</span><strong>'+fmtBytes(storage.progress_json_bytes)+'</strong></div><div class="stat"><span>Tabelle QuizLab</span><strong>'+fmtBytes((Number(storage.banks_table_bytes)||0)+(Number(storage.progress_table_bytes)||0))+'</strong></div></div></section><section class="card danger-zone"><div class="section-head"><div><div class="eyebrow">Materie cloud</div><h3 class="section-title">Pulizia globale</h3></div></div><p class="subtle">Solo amministratore. “Elimina per tutti” cancella tutte le copie cloud della materia e i relativi progressi. I dispositivi collegati la rimuoveranno al prossimo sync e non potranno ricrearla automaticamente da copie obsolete.</p><div class="admin-list">'+(globalCourseRows||'<div class="empty">Nessuna materia nel cloud.</div>')+'</div></section><section class="card"><div class="section-head"><div><div class="eyebrow">Recupero Admin</div><h3 class="section-title">Materie ritirate</h3></div></div><p class="subtle">Riabilitare una materia rimuove il blocco globale. I dati eliminati non vengono ricreati: per recuperarli serve un backup/import.</p><div class="admin-list">'+(retiredRows||'<div class="empty">Nessuna materia ritirata.</div>')+'</div></section><section class="card"><div class="section-head"><div><div class="eyebrow">Utenti</div><h3 class="section-title">Approvazioni, accessi e statistiche</h3></div></div><div class="admin-list">'+(rows||'<div class="empty">Nessun utente.</div>')+'</div></section></div>','Admin','Controllo accessi e cloud',true);
 }
+async function forceAppUpdate(){
+ if(!navigator.onLine){toast('Serve Internet per aggiornare QuizLab');return;}
+ try{
+  toast('Aggiorno QuizLab…');
+  // Remove only QuizLab's own caches. Do not touch unrelated apps on the same origin.
+  if('caches' in globalThis){
+   const keys=await caches.keys();
+   await Promise.all(keys.filter(k=>k.startsWith('quizlab-mobile-dev-')).map(k=>caches.delete(k)));
+  }
+  // Unregister only the service worker controlling this QuizLab scope.
+  if('serviceWorker' in navigator){
+   const reg=await navigator.serviceWorker.getRegistration('./');
+   if(reg)await reg.unregister();
+  }
+  const u=new URL(location.href);
+  u.searchParams.set('qlrefresh',String(Date.now()));
+  location.replace(u.toString());
+ }catch(e){
+  console.warn('Force app update',e);
+  alert('Aggiornamento forzato non riuscito:\n'+(e?.message||e));
+ }
+}
+
 function cloudPage(){
  const cfg=store.settings||{},user=cloudState.user;
  const configured=sync.configured(cfg)||sync.configured(DEFAULT_CLOUD_CONFIG||{});
@@ -765,7 +788,7 @@ function cloudPage(){
  }else if(!user){
   body+='<section class="card"><h2 class="section-title">Account</h2><p class="subtle">L’accesso è ora nella pagina principale, così lo trovi subito all’apertura di QuizLab.</p><div class="actions"><button class="btn" data-action="home">Vai alla Home</button></div></section>';
  }else{
-  body+='<section class="card"><h2 class="section-title">Sincronizzazione</h2><div class="sync-panel"><div><span>Account</span><strong>'+esc(user.email||user.id)+'</strong></div><div><span>Stato</span><strong>'+esc(syncBadgeModel().label)+'</strong></div><div><span>Ultima sincronizzazione</span><strong>'+esc(fmtSyncAgo(store.sync?.lastPullAt||store.sync?.lastPushAt)||'non ancora completata')+'</strong></div><div><span>Dati locali da sincronizzare</span><strong>'+((store.sync?.dirtyCourseIds||[]).length)+' materie</strong></div><div><span>Build</span><strong>v'+esc(APP_VERSION)+'</strong></div></div>'+(guestDataPending?'<div class="local-data-notice"><strong>🗂️ Dati locali non associati rilevati</strong><p class="subtle">Per sicurezza non sono stati collegati automaticamente a questo account.</p><div class="actions"><button class="btn secondary" data-action="keep-local-separate">Mantieni separati</button><button class="btn" data-action="import-local-data">Importa dati locali</button></div></div>':'')+'<div class="actions"><button class="btn" data-action="sync-all">Sincronizza tutto</button><button class="btn secondary" data-action="push-profile">Sincronizza profilo</button>'+(accessState.isAdmin?'<button class="btn secondary" data-action="open-admin">🛡️ Admin'+(adminPendingCount?' · '+adminPendingCount:'')+'</button>':'')+'<button class="btn ghost" data-action="sign-out">Esci</button></div><p class="subtle">La sincronizzazione è automatica. Il pulsante serve solo per forzarla subito manualmente.</p></section>';
+  body+='<section class="card"><h2 class="section-title">Sincronizzazione</h2><div class="sync-panel"><div><span>Account</span><strong>'+esc(user.email||user.id)+'</strong></div><div><span>Stato</span><strong>'+esc(syncBadgeModel().label)+'</strong></div><div><span>Ultima sincronizzazione</span><strong>'+esc(fmtSyncAgo(store.sync?.lastPullAt||store.sync?.lastPushAt)||'non ancora completata')+'</strong></div><div><span>Dati locali da sincronizzare</span><strong>'+((store.sync?.dirtyCourseIds||[]).length)+' materie</strong></div><div><span>Build</span><strong>v'+esc(APP_VERSION)+'</strong></div></div>'+(guestDataPending?'<div class="local-data-notice"><strong>🗂️ Dati locali non associati rilevati</strong><p class="subtle">Per sicurezza non sono stati collegati automaticamente a questo account.</p><div class="actions"><button class="btn secondary" data-action="keep-local-separate">Mantieni separati</button><button class="btn" data-action="import-local-data">Importa dati locali</button></div></div>':'')+'<div class="actions"><button class="btn" data-action="sync-all">Sincronizza tutto</button><button class="btn secondary" data-action="force-app-update">↻ Aggiorna QuizLab</button><button class="btn secondary" data-action="push-profile">Sincronizza profilo</button>'+(accessState.isAdmin?'<button class="btn secondary" data-action="open-admin">🛡️ Admin'+(adminPendingCount?' · '+adminPendingCount:'')+'</button>':'')+'<button class="btn ghost" data-action="sign-out">Esci</button></div><p class="subtle">La sincronizzazione è automatica. Il pulsante serve solo per forzarla subito manualmente.</p></section>';
  }
  body+='</div>';page(body,'Cloud','Account e sync',true);
 }
@@ -1000,6 +1023,7 @@ if(a==='keep-local-separate'){
  store.sync.ownerId=userId;await saveStore(store);cloudPage();return;
 }
 if(a==='sync-all'){await forceCloudPullAll();return;}
+if(a==='force-app-update'){await forceAppUpdate();return;}
 
 
 if(a==='avatar-pick'){document.getElementById('avatarPicker')?.click();return;}
@@ -1042,7 +1066,7 @@ async function init(){store=await loadStore();if(!store.courses||typeof store.co
   reloadingForUpdate=true;
   location.reload();
  });
- const reg=await navigator.serviceWorker.register('./service-worker.js');
+ const reg=await navigator.serviceWorker.register('./service-worker.js',{updateViaCache:'none'});
  await reg.update();
 }catch(e){console.warn(e);}}
 init().catch(e=>{app.innerHTML='<main class="main"><section class="card"><h2>Errore avvio</h2><p>'+esc(e?.message||e)+'</p></section></main>';});
