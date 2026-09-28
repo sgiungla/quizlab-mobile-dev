@@ -4,7 +4,7 @@ import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
 
 const BANK_SCHEMA='unisgiunglalab.quizlab.bank';
 const BACKUP_SCHEMA='unisgiunglalab.quizlab.backup';
-const APP_VERSION='0.10.13';
+const APP_VERSION='0.10.14';
 const sync=new QuizLabSyncAdapter();
 const app=document.getElementById('app');
 const picker=document.getElementById('filePicker');
@@ -542,9 +542,13 @@ async function cloudSync({silent=true}={}){
    store.sync.hiddenCourseIds=uniq([...(store.sync?.hiddenCourseIds||[]),...blockedIds]);
    if(route.courseId&&blockedIds.includes(route.courseId)){route={name:'home',courseId:null};session=null;}
   }
-  applyConfirmedPushProgress(result.push?.items||[]);
+  // A sync may have started with an older snapshot while the user keeps studying.
+  // Detect that BEFORE applying the server-confirmed push state. Otherwise an
+  // in-flight sync can overwrite a newer local exam/attempt with its older
+  // snapshot (for example: new 6/30 briefly shown, then old 23/30 restored).
   changedDuringSync=(store.sync?.lastLocalChangeAt||null)!==changeToken;
   if(!changedDuringSync){
+   applyConfirmedPushProgress(result.push?.items||[]);
    mergeRemoteCourses(result.pull?.courses||[]);
    store.sync.dirtyCourseIds=(store.sync?.dirtyCourseIds||[]).filter(id=>!dirtyAtStart.includes(id));
    store.sync.dirtyBankCourseIds=(store.sync?.dirtyBankCourseIds||[]).filter(id=>!bankDirtyAtStart.includes(id));
