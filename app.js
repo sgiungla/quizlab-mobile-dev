@@ -4,6 +4,7 @@ import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
 
 const BANK_SCHEMA='unisgiunglalab.quizlab.bank';
 const BACKUP_SCHEMA='unisgiunglalab.quizlab.backup';
+const APP_VERSION='0.10.9';
 const sync=new QuizLabSyncAdapter();
 const app=document.getElementById('app');
 const picker=document.getElementById('filePicker');
@@ -564,6 +565,43 @@ async function cloudSync({silent=true}={}){
   }
  }
 }
+async function forceCloudPullAll(){
+ if(!cloudState.user){toast('Collega prima il tuo account cloud');return false;}
+ if(!navigator.onLine){toast('Sei offline: impossibile leggere il cloud');return false;}
+ if(syncInFlight){
+  toast('Sincronizzazione già in corso · riprova tra un attimo ☁️');
+  return false;
+ }
+ store.sync=store.sync||{};
+ // Manual full sync means: forget device-only hidden courses, finish any pending push,
+ // then perform an explicit unfiltered pull from the cloud and hydrate this device.
+ store.sync.hiddenCourseIds=[];
+ await saveStore(store);
+ const ok=await cloudSync({silent:true});
+ if(!ok&&lastSyncError){
+  alert('Sincronizzazione non riuscita. Controlla la connessione e riprova.');
+  return false;
+ }
+ try{
+  const pull=await sync.pullChanges({clientId:store.sync?.clientId});
+  const rows=Array.isArray(pull?.courses)?pull.courses:[];
+  mergeRemoteCourses(rows);
+  store.sync.lastPullAt=now();
+  store.sync.mode='cloud-online';
+  await saveStore(store);
+  lastSyncError=false;
+  const localCount=Object.keys(store.courses||{}).length;
+  toast('Cloud letto: '+rows.length+' materie · presenti sul dispositivo: '+localCount+' ☁️');
+  render();
+  return true;
+ }catch(e){
+  lastSyncError=true;
+  refreshSyncBadge();
+  alert('Lettura completa del cloud non riuscita:\n'+(e?.message||e));
+  return false;
+ }
+}
+
 function scheduleAutoSync(){
  if(!cloudState.user||!navigator.onLine)return;
  if(session&&route.name==='session')return;
@@ -694,7 +732,7 @@ function cloudPage(){
  }else if(!user){
   body+='<section class="card"><h2 class="section-title">Account</h2><p class="subtle">L’accesso è ora nella pagina principale, così lo trovi subito all’apertura di QuizLab.</p><div class="actions"><button class="btn" data-action="home">Vai alla Home</button></div></section>';
  }else{
-  body+='<section class="card"><h2 class="section-title">Sincronizzazione</h2><div class="sync-panel"><div><span>Account</span><strong>'+esc(user.email||user.id)+'</strong></div><div><span>Stato</span><strong>'+esc(syncBadgeModel().label)+'</strong></div><div><span>Ultima sincronizzazione</span><strong>'+esc(fmtSyncAgo(store.sync?.lastPullAt||store.sync?.lastPushAt)||'non ancora completata')+'</strong></div><div><span>Dati locali da sincronizzare</span><strong>'+((store.sync?.dirtyCourseIds||[]).length)+' materie</strong></div></div>'+(guestDataPending?'<div class="local-data-notice"><strong>🗂️ Dati locali non associati rilevati</strong><p class="subtle">Per sicurezza non sono stati collegati automaticamente a questo account.</p><div class="actions"><button class="btn secondary" data-action="keep-local-separate">Mantieni separati</button><button class="btn" data-action="import-local-data">Importa dati locali</button></div></div>':'')+'<div class="actions"><button class="btn" data-action="sync-all">Sincronizza tutto</button><button class="btn secondary" data-action="push-profile">Sincronizza profilo</button>'+(accessState.isAdmin?'<button class="btn secondary" data-action="open-admin">🛡️ Admin'+(adminPendingCount?' · '+adminPendingCount:'')+'</button>':'')+'<button class="btn ghost" data-action="sign-out">Esci</button></div><p class="subtle">La sincronizzazione è automatica. Il pulsante serve solo per forzarla subito manualmente.</p></section>';
+  body+='<section class="card"><h2 class="section-title">Sincronizzazione</h2><div class="sync-panel"><div><span>Account</span><strong>'+esc(user.email||user.id)+'</strong></div><div><span>Stato</span><strong>'+esc(syncBadgeModel().label)+'</strong></div><div><span>Ultima sincronizzazione</span><strong>'+esc(fmtSyncAgo(store.sync?.lastPullAt||store.sync?.lastPushAt)||'non ancora completata')+'</strong></div><div><span>Dati locali da sincronizzare</span><strong>'+((store.sync?.dirtyCourseIds||[]).length)+' materie</strong></div><div><span>Build</span><strong>v'+esc(APP_VERSION)+'</strong></div></div>'+(guestDataPending?'<div class="local-data-notice"><strong>🗂️ Dati locali non associati rilevati</strong><p class="subtle">Per sicurezza non sono stati collegati automaticamente a questo account.</p><div class="actions"><button class="btn secondary" data-action="keep-local-separate">Mantieni separati</button><button class="btn" data-action="import-local-data">Importa dati locali</button></div></div>':'')+'<div class="actions"><button class="btn" data-action="sync-all">Sincronizza tutto</button><button class="btn secondary" data-action="push-profile">Sincronizza profilo</button>'+(accessState.isAdmin?'<button class="btn secondary" data-action="open-admin">🛡️ Admin'+(adminPendingCount?' · '+adminPendingCount:'')+'</button>':'')+'<button class="btn ghost" data-action="sign-out">Esci</button></div><p class="subtle">La sincronizzazione è automatica. Il pulsante serve solo per forzarla subito manualmente.</p></section>';
  }
  body+='</div>';page(body,'Cloud','Account e sync',true);
 }
@@ -928,7 +966,7 @@ if(a==='keep-local-separate'){
  guestDataPending=false;
  store.sync.ownerId=userId;await saveStore(store);cloudPage();return;
 }
-if(a==='sync-all'){store.sync.hiddenCourseIds=[];await saveStore(store);await cloudSync({silent:false});return;}
+if(a==='sync-all'){await forceCloudPullAll();return;}
 
 
 if(a==='avatar-pick'){document.getElementById('avatarPicker')?.click();return;}
