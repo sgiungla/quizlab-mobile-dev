@@ -928,7 +928,7 @@ if(a==='keep-local-separate'){
  guestDataPending=false;
  store.sync.ownerId=userId;await saveStore(store);cloudPage();return;
 }
-if(a==='sync-all'){await cloudSync({silent:false});return;}
+if(a==='sync-all'){store.sync.hiddenCourseIds=[];await saveStore(store);await cloudSync({silent:false});return;}
 
 
 if(a==='avatar-pick'){document.getElementById('avatarPicker')?.click();return;}
