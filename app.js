@@ -4,7 +4,7 @@ import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
 
 const BANK_SCHEMA='unisgiunglalab.quizlab.bank';
 const BACKUP_SCHEMA='unisgiunglalab.quizlab.backup';
-const APP_VERSION='0.10.17';
+const APP_VERSION='0.10.18';
 const sync=new QuizLabSyncAdapter();
 const app=document.getElementById('app');
 const picker=document.getElementById('filePicker');
@@ -642,15 +642,34 @@ async function forceCloudPullAll(){
   store.sync.mode='cloud-online';
   await saveStore(store);
 
-  // Progress/local-only changes can still be pushed after the bank hydration.
-  const progressDirty=(store.sync.dirtyCourseIds||[]).length>0;
+  // Manual sync is a convergence operation: after the pull-first merge,
+  // publish the union for every visible course, not only items already marked dirty.
+  // This repairs a stale device and makes the cloud the same superset seen locally.
+  const convergeIds=Object.entries(store.courses||{})
+    .filter(([,raw])=>raw&&!raw.archived&&!raw.cloudBlocked)
+    .map(([id])=>id);
+  store.sync.dirtyCourseIds=uniq([...(store.sync.dirtyCourseIds||[]),...convergeIds]);
+  await saveStore(store);
+
   syncInFlight=false;
   refreshSyncBadge();
-  if(progressDirty)await cloudSync({silent:true});
+  if(convergeIds.length){
+    const ok=await cloudSync({silent:true});
+    if(!ok&&lastSyncError)throw new Error('Il push di convergenza non è stato confermato');
+  }
+
+  // Final authoritative read: prove that this client can read back what was
+  // just converged, then merge once more before declaring success.
+  const verify=await sync.pullChanges({clientId:store.sync?.clientId});
+  const verifiedRows=Array.isArray(verify?.courses)?verify.courses:[];
+  mergeRemoteCourses(verifiedRows,{mergeBanks:true,mergeProgressState:true});
+  store.sync.lastPullAt=now();
+  store.sync.mode='cloud-online';
+  await saveStore(store);
 
   lastSyncError=false;
   const visibleCount=Object.values(store.courses||{}).filter(x=>qbank(shape(x)).length||shape(x).attempts.length).length;
-  toast('Cloud letto: '+rows.length+' materie · visibili: '+visibleCount+' ☁️');
+  toast('Sync verificata: '+verifiedRows.length+' materie · visibili: '+visibleCount+' ☁️');
   render();
   return true;
  }catch(e){
