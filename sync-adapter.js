@@ -431,9 +431,11 @@ export class QuizLabSyncAdapter {
     let expectedRevision=hasKnownRevision?Number(course.cloudRevision||0):Number(existing?.revision||0);
     let progress=this.progressPayload(course);
 
-    // One-time migration for courses created before v0.7, which have no local
-    // cloudRevision yet: merge the current cloud snapshot before the first write.
-    if(!hasKnownRevision&&existing?.progress_json){
+    // Safety invariant: ALWAYS merge the fresh server snapshot before writing.
+    // A stale client may still carry the latest revision number but a poorer
+    // local payload; without this merge it could overwrite newer progress
+    // without producing a revision conflict. Explicit newer resets still win.
+    if(existing?.progress_json){
       progress=this.mergeProgress(progress,existing.progress_json);
     }
 
