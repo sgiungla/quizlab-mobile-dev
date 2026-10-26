@@ -1,16 +1,10 @@
-# QuizLab Mobile DEV
+# QuizLab 0.11.27
 
-Sviluppo separato dalla versione stabile di UniSgiunglaLab.
+PWA: https://sgiungla.github.io/quizlab-mobile-dev/
+Amministrazione: https://sgiungla.github.io/quizlab-mobile-dev/admin.html
 
-## Stato
-- multimateria tramite `courseId`
-- import banca completa QuizLab
-- allenamento offline
-- spiegazioni e riferimenti
-- errori, segnate e statistiche locali
-- backup/import locale
-- PWA installabile
-- sincronizzazione cloud Supabase attiva con account, approvazione Admin, backup/migrazione, avatar e gestione materie
-- sincronizzazione progressi multi-dispositivo con controllo di revisione e merge anti-conflitto
+Cache locale, sincronizzazione per revisioni e verifica firmata valida per massimo24ore. Il database IndexedDB precedente viene mantenuto.
 
-La versione desktop stabile non viene modificata da questo repository.
+Notifiche/obiettivi sperimentali e acquisti simulati restano nel LAB: non sono servizi di questa release. Nessun addebito viene effettuato da questo pannello.
+
+Per passare da0.10.18 chiudere tutte le finestre dellaPWA e riaprire con rete disponibile. Non cancellare dati del sito o reinstallare per aggiornare.

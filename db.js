@@ -7,6 +7,8 @@ const KEY = 'quizlab';
 let activeWorkspaceKey='guest';
 const mergeHelper=new QuizLabSyncAdapter();
 let writeChain=Promise.resolve();
+let workspaceGeneration=0;
+const FALLBACK_KEY='quizlab-mobile-fallback';
 
 function openDb(){
   return new Promise((resolve,reject)=>{
@@ -45,6 +47,8 @@ export function emptySyncState(){
     dirtyBankCourseIds:[],
     hiddenCourseIds:[],
     profileDirty:false,
+    ackCourseChanges:{},
+    ackBankChanges:{},
     lastLocalChangeAt:null,
     lastPushAt:null,
     lastPullAt:null
@@ -83,6 +87,7 @@ function emptyContainer(){
 }
 
 function shapeContainer(raw){
+  if(Number(raw?.version)>3)throw new Error('Schema locale più recente non supportato: dati conservati. Aggiorna QuizLab.');
   if(raw && Number(raw.version)>=3 && raw.workspaces && typeof raw.workspaces==='object'){
     const out={version:3,workspaces:{},meta:raw.meta&&typeof raw.meta==='object'?raw.meta:{},updatedAt:raw.updatedAt||new Date().toISOString()};
     for(const [key,value] of Object.entries(raw.workspaces)) out.workspaces[key]=shapeStore(value);
@@ -111,9 +116,10 @@ async function readRaw(){
       const req=tx.objectStore(STORE).get(KEY);
       req.onsuccess=()=>resolve(req.result||null);
       req.onerror=()=>reject(req.error);
+      tx.onabort=()=>reject(tx.error||new Error('Lettura locale annullata'));
     });
   }catch(e){
-    const raw=localStorage.getItem('quizlab-mobile-fallback');
+    const raw=localStorage.getItem(FALLBACK_KEY);
     return raw?JSON.parse(raw):null;
   }
 }
@@ -127,10 +133,44 @@ async function writeRaw(container){
       tx.objectStore(STORE).put(container,KEY);
       tx.oncomplete=()=>resolve();
       tx.onerror=()=>reject(tx.error);
+      tx.onabort=()=>reject(tx.error||new Error('Salvataggio locale annullato'));
     });
   }catch(e){
-    localStorage.setItem('quizlab-mobile-fallback',JSON.stringify(container));
+    localStorage.setItem(FALLBACK_KEY,JSON.stringify(container));
   }
+}
+
+// One readwrite transaction serializes read/merge/write across browser tabs.
+// The Web Lock also protects the localStorage fallback in Chrome/Edge.
+function updateContainer(transform){
+  const operation=async()=>{
+    let db=null;
+    try{db=await openDb();}catch(error){}
+    if(db)return new Promise((resolve,reject)=>{
+      const tx=db.transaction(STORE,'readwrite'),objectStore=tx.objectStore(STORE);
+      const request=objectStore.get(KEY);let result;
+      request.onsuccess=()=>{
+        try{
+          const container=shapeContainer(request.result||null);
+          result=transform(container);
+          container.updatedAt=new Date().toISOString();
+          objectStore.put(container,KEY);
+        }catch(error){tx.abort();reject(error);}
+      };
+      tx.oncomplete=()=>{db.close?.();resolve(result);};
+      tx.onerror=()=>{db.close?.();reject(tx.error);};
+      tx.onabort=()=>{db.close?.();reject(tx.error||new Error('Salvataggio annullato'));};
+    });
+    if(!globalThis.navigator?.locks?.request)throw new Error('Salvataggio degradato non sicuro: usa Chrome/Edge con IndexedDB o Web Locks disponibili');
+    const raw=localStorage.getItem(FALLBACK_KEY);
+    const container=shapeContainer(raw?JSON.parse(raw):null);
+    const result=transform(container);container.updatedAt=new Date().toISOString();
+    localStorage.setItem(FALLBACK_KEY,JSON.stringify(container));
+    return result;
+  };
+  const locked=()=>globalThis.navigator?.locks?.request?globalThis.navigator.locks.request('quizlab-local-lab-state',operation):operation();
+  writeChain=writeChain.then(locked,locked);
+  return writeChain;
 }
 
 function meaningful(store){
@@ -154,18 +194,20 @@ function mergeCourseCopies(a,b){
   const newest=bAt>=aAt?b:a,older=newest===b?a:b;
   const aBankAt=String(a.bankUpdatedAt||a.createdAt||a.updatedAt||'');
   const bBankAt=String(b.bankUpdatedAt||b.createdAt||b.updatedAt||'');
-  let bankSource=aBankAt>bBankAt?a:bBankAt>aBankAt?b:null;
-  if(!bankSource)bankSource=courseBankCount(b)>=courseBankCount(a)?b:a;
+  const bankSource=aBankAt>bBankAt?a:b;
+  const bankRevisions=[a.cloudBankRevision,b.cloudBankRevision].map(Number).filter(Number.isFinite);
+  const cloudSource=Number(a.cloudBankRevision||0)>Number(b.cloudBankRevision||0)?a:b;
+  const bank=cloudSource.managedByAdmin?mergeHelper.bankPayload(cloudSource):mergeHelper.mergeBanks(mergeHelper.bankPayload(a),mergeHelper.bankPayload(b));
   const merged=mergeHelper.mergeProgress(mergeHelper.progressPayload(a),mergeHelper.progressPayload(b));
   const revisions=[a.cloudRevision,b.cloudRevision].filter(v=>v!==undefined&&v!==null).map(Number).filter(Number.isFinite);
   return shapeStore({courses:{x:{
     ...older,...newest,
     subject:bankSource.subject||newest.subject||older.subject||'',
-    officialBank:Array.isArray(bankSource.officialBank)?bankSource.officialBank:[],
-    aiBank:Array.isArray(bankSource.aiBank)?bankSource.aiBank:[],
-    topicMap:bankSource.topicMap??null,
-    aiWorkflow:bankSource.aiWorkflow||{},
-    bankUpdatedAt:maxIso(aBankAt,bBankAt)||maxIso(aAt,bAt),
+    officialBank:bank.officialBank,aiBank:bank.aiBank,topicMap:bank.topicMap,aiWorkflow:bank.aiWorkflow,
+    bankMeta:bank.bankMeta,bankUpdatedAt:bank.updatedAt,
+    cloudBankRevision:bankRevisions.length?Math.max(...bankRevisions):null,
+    cloudBankBase:cloudSource.cloudBankBase||null,
+    managedByAdmin:!!cloudSource.managedByAdmin,
     attempts:merged.attempts||[],
     exams:merged.exams||[],
     marked:merged.marked||[],
@@ -189,6 +231,17 @@ function mergeWorkspace(a,b){
     out.courses[id]=mergeCourseCopies(x.courses?.[id]||null,y.courses?.[id]||null);
   }
   out.updatedAt=maxIso(x.updatedAt,y.updatedAt)||new Date().toISOString();
+  const courseAck={...(x.sync.ackCourseChanges||{}),...(y.sync.ackCourseChanges||{})};
+  const bankAck={...(x.sync.ackBankChanges||{}),...(y.sync.ackBankChanges||{})};
+  const pending=new Set([...(x.sync.dirtyCourseIds||[]),...(y.sync.dirtyCourseIds||[])]);
+  const bankPending=new Set([...(x.sync.dirtyBankCourseIds||[]),...(y.sync.dirtyBankCourseIds||[])]);
+  for(const id of pending){
+    if(!y.sync.dirtyCourseIds.includes(id)&&courseAck[id]&&courseAck[id]===out.courses[id]?.updatedAt)pending.delete(id);
+  }
+  for(const id of bankPending){
+    if(!y.sync.dirtyBankCourseIds.includes(id)&&bankAck[id]&&out.courses[id]&&bankAck[id]===mergeHelper.bankHash(mergeHelper.bankPayload(out.courses[id])))bankPending.delete(id);
+  }
+  out.sync={...out.sync,dirtyCourseIds:[...pending],dirtyBankCourseIds:[...bankPending],ackCourseChanges:courseAck,ackBankChanges:bankAck};
   return out;
 }
 
@@ -205,8 +258,10 @@ export async function workspaceMigrationInfo(userId){
 }
 
 export async function selectWorkspace(userId,{importGuest=false,markGuestHandled=false}={}){
-  const c=shapeContainer(await readRaw());
   const key=userId?'user:'+userId:'guest';
+  activeWorkspaceKey=key;
+  const generation=++workspaceGeneration;
+  return updateContainer(c=>{
   if(!c.workspaces[key])c.workspaces[key]=emptyStore();
   if(userId&&importGuest){
     const guestIds=Object.keys(c.workspaces.guest?.courses||{});
@@ -218,37 +273,46 @@ export async function selectWorkspace(userId,{importGuest=false,markGuestHandled
   if(userId&&markGuestHandled){
     c.meta.guestHandledByUser={...(c.meta.guestHandledByUser||{}),[userId]:c.meta.guestDirtyAt||new Date().toISOString()};
   }
-  activeWorkspaceKey=key;
-  await writeRaw(c);
+  if(generation!==workspaceGeneration)throw new Error('Cambio account superato da una nuova richiesta');
   return shapeStore(c.workspaces[key]);
+  });
 }
 
 export function currentWorkspaceKey(){return activeWorkspaceKey;}
+export function currentWorkspaceGeneration(){return workspaceGeneration;}
+
+// The admin bank picker can read this account's existing PWA courses without
+// switching the active workspace, merging guest data or writing to storage.
+export async function readUserCourses(userId){
+  if(typeof userId!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId))throw new Error('Account locale non valido');
+  const raw=await readRaw();
+  const workspace=Number(raw?.version)>=3?raw.workspaces?.['user:'+userId]:null;
+  return structuredClone(workspace?.courses&&typeof workspace.courses==='object'?workspace.courses:{});
+}
 
 export async function loadStore(){
-  const c=shapeContainer(await readRaw());
-  if(!c.workspaces[activeWorkspaceKey])c.workspaces[activeWorkspaceKey]=emptyStore();
+  const key=activeWorkspaceKey;
+  return updateContainer(c=>{
+  if(!c.workspaces[key])c.workspaces[key]=emptyStore();
   // Persist migration from the old single-store format.
-  await writeRaw(c);
-  return shapeStore(c.workspaces[activeWorkspaceKey]);
+  return shapeStore(c.workspaces[key]);
+  });
 }
 
 export async function saveStore(input){
-  const requested=shapeStore(input);
+  const workspaceKey=activeWorkspaceKey;
+  const requested=shapeStore(structuredClone(input));
+  if(requested.sync.ownerId&&!String(requested.sync.ownerId).startsWith('local:')&&workspaceKey!==('user:'+requested.sync.ownerId))throw new Error('Salvataggio annullato: workspace diverso dal proprietario');
   requested.updatedAt=new Date().toISOString();
-  const operation=async()=>{
-    const c=shapeContainer(await readRaw());
-    const current=c.workspaces[activeWorkspaceKey]||emptyStore();
+  return updateContainer(c=>{
+    const current=c.workspaces[workspaceKey]||emptyStore();
     const safe=mergeWorkspace(current,requested);
     // Respect explicit local/cloud removals represented by hiddenCourseIds.
     for(const id of requested.sync?.hiddenCourseIds||[]){
       if(!requested.courses?.[id])delete safe.courses[id];
     }
-    c.workspaces[activeWorkspaceKey]=safe;
-    if(activeWorkspaceKey==='guest')c.meta.guestDirtyAt=safe.updatedAt;
-    await writeRaw(c);
+    c.workspaces[workspaceKey]=safe;
+    if(workspaceKey==='guest')c.meta.guestDirtyAt=safe.updatedAt;
     return safe;
-  };
-  writeChain=writeChain.then(operation,operation);
-  return writeChain;
+  });
 }

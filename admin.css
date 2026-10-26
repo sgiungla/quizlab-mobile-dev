@@ -1,0 +1,25 @@
+.admin-console{width:min(1380px,100%);margin:0 auto;padding:24px;box-sizing:border-box}
+.admin-console h1{font-size:clamp(25px,4vw,36px)}
+.admin-console h2,.admin-console h3,.admin-console h4{margin:0 0 12px}
+.admin-console label{display:grid;gap:7px;margin:14px 0}
+.admin-console .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px}
+.admin-console .checkbox-label{display:flex;align-items:center;gap:10px}.admin-console .checkbox-label input{width:auto;margin:0}
+.admin-console [hidden]{display:none!important}
+.admin-console details>summary{cursor:pointer;padding:12px 0;list-style-position:inside}
+.admin-console button:disabled{opacity:.55;cursor:not-allowed}
+.admin-console .actions{flex-wrap:wrap}
+.account-tabs{display:flex;flex-wrap:wrap;gap:8px;border-block:1px solid var(--line,#334155);padding:14px 0;margin:18px 0}
+.account-tabs [aria-selected="true"]{background:#166534;color:#fff;border-color:#4ade80}
+.account-detail{border:2px solid #15803d}
+.assignment-source,.assignment-destination,.preview-box,.history-section,.contract-card{border:1px solid var(--line,#334155);border-radius:16px;padding:18px;margin:12px 0}
+.assignment-source{border-left:5px solid #38bdf8}.assignment-destination{border-left:5px solid #4ade80}
+.source-summary{font-weight:700;white-space:pre-line}.assignment-diff{white-space:pre-line;font-weight:600;line-height:1.8}
+.module-picker{border:1px solid var(--line,#334155);border-radius:16px;padding:16px;margin:16px 0;min-width:0}.module-picker legend{font-weight:700;padding:0 8px}.module-picker #effectiveModules{line-height:1.7;overflow-wrap:anywhere}.module-picker select{width:100%;min-width:0}
+.admin-advanced{font-size:13px;overflow-wrap:anywhere}.admin-advanced p{max-height:180px;overflow:auto}
+#assignmentWarning{border-radius:12px;background:rgba(234,179,8,.12);padding:12px;line-height:1.65}
+#targetSummary{line-height:1.8}#adminMessage{white-space:pre-line;line-height:1.65}
+.installment-row{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:10px 0;border-bottom:1px solid var(--line,#334155)}
+.confirm-overlay{position:fixed;inset:0;z-index:1000;background:rgba(2,6,23,.82);display:grid;place-items:center;padding:20px}
+.confirm-overlay[hidden]{display:none!important}.confirm-overlay>.card{width:min(650px,100%);max-height:85vh;overflow:auto;box-sizing:border-box}
+#adminConfirmText{white-space:pre-line;line-height:1.7;overflow-wrap:anywhere}
+@media(max-width:700px){.admin-console{padding:12px}.admin-console .card{padding:16px}.admin-console .row{grid-template-columns:1fr}.installment-row{align-items:flex-start;flex-direction:column}.account-tabs .btn{flex:1 1 45%}.assignment-source,.assignment-destination,.preview-box,.history-section{padding:14px}.confirm-overlay{padding:12px}}
