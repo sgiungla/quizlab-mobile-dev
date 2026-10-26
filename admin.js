@@ -1,3 +1,4 @@
+import {installAdminSuite} from './admin-suite.mjs';
 import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
 import {readUserCourses} from './db.js';
 import {createAdminUserListState,adminUserPageRequest,readAdminUserFilters,renderAdminUserList,renderAdminUserDetails,applyAdminUserPage,resetAdminUserFilters,updateAdminUserFilters,adminEffectiveStatus} from './admin-user-list.js';
@@ -204,7 +205,8 @@ function confirmAdmin(text,label='Conferma',fingerprint=null,token=contextToken(
 el('adminConfirmAccept').addEventListener('click',()=>completeConfirmation(true));
 el('adminConfirmCancel').addEventListener('click',()=>completeConfirmation(false));
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&confirmation)completeConfirmation(false);});
-function setVisibility(){
+function setVisibility(){queueMicrotask(()=>globalThis.dispatchEvent(new Event('quizlab-admin-context')));
+
  el('adminLogin').hidden=!!session;el('logoutAdmin').hidden=!session;el('adminTools').hidden=!permitted();
  el('adminIdentity').textContent=session?'Account: '+session.user.email:'Accesso amministratore richiesto.';
  if(!permitted())completeConfirmation(false);
@@ -401,7 +403,7 @@ async function bootstrap(){
   const admin=await rpc('quizlab_is_admin');if(token.generation!==generation||token.user!==session?.user?.id)return;isAdmin=admin===true;if(!permitted())throw new Error('Accesso riservato a un amministratore con licenza valida');
   setVisibility();await Promise.all([refreshUsers(),loadPlans()]);assertContext(token);
   const linked=new URL(location.href).searchParams.get('user');if(linked&&!selectedTargetId){userCache.set(linked,{user_id:linked});await openAccount(linked);}
-  else if(el('targetUser').value)await refreshTarget();selectCatalog();message('Amministrazione locale pronta.');
+  else if(el('targetUser').value)await refreshTarget();selectCatalog();message('Amministrazione pronta.');
  }catch(error){if(token.generation!==generation||token.user!==(session?.user?.id||null))return;isAdmin=false;setVisibility();message(error.message||String(error));}
 }
 async function initialize(){
@@ -519,4 +521,5 @@ el('targetContracts').addEventListener('click',event=>{
  });
 });
 window.addEventListener('unisgiungla-license-change',()=>{if(!permitted())completeConfirmation(false);setVisibility();});
-initialize().catch(error=>message(error.message||String(error)));
+installAdminSuite({client:()=>client,session:()=>session,permitted,rpc,confirm:confirmAdmin,hasTarget:()=>!!targetDetail&&!!selectedTargetId});
+initialize().catch(error=>message(error.message||String(error))); 

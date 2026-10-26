@@ -17,11 +17,13 @@ export function restoreUpdateCheckpoint({accountId,courses}){
  }catch{return null;}
 }
 export async function installUpdates({version,checkpoint}){
- let pending=null;
+ let pending=null,deferred=false,blockedActivation=false;
+ const editing=()=>!!globalThis.QuizLabStudyUI?.active?.()||!!document.querySelector('.shop-dialog[open]');
  async function save(){
   const value=await checkpoint();sessionStorage.setItem(KEY,JSON.stringify({...value,version:1,fromRelease:version,savedAt:Date.now()}));return value;
  }
  async function reload(){
+  if(editing()){deferred=true;show('Aggiornamento pronto. Completa e chiudi il pannello di studio prima della riapertura.');return;}
   if(pending)return pending;
   pending=(async()=>{
    document.getElementById('app')?.setAttribute('inert','');
@@ -35,9 +37,13 @@ export async function installUpdates({version,checkpoint}){
  const registration=await navigator.serviceWorker.register('./service-worker.js',{updateViaCache:'none'});
  async function activate(){
   if(!registration.waiting)return;
+  if(editing()){blockedActivation=true;show('Aggiornamento pronto. Completa e chiudi il pannello di studio per applicarlo.');return;}
+  blockedActivation=false;
   try{await save();show('Aggiornamento pronto. Salvataggio completato, riapertura in corso…');registration.waiting.postMessage({type:'QUIZLAB_ACTIVATE_UPDATE'});}
   catch{show('Aggiornamento in attesa del salvataggio. I dati restano su questo dispositivo.');}
  }
+ const observer=new MutationObserver(()=>{if(!editing()){if(deferred){deferred=false;reload();}else if(blockedActivation){blockedActivation=false;activate();}}});
+ observer.observe(document.body,{childList:true,subtree:true});
  registration.addEventListener('updatefound',()=>{const worker=registration.installing;worker?.addEventListener('statechange',()=>{if(worker.state==='installed'&&navigator.serviceWorker.controller)activate();});});
  globalThis.quizlabApplyUpdate=async()=>{
   await registration.update();

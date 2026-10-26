@@ -11,7 +11,7 @@ import {createAdminUserListState,adminUserPageRequest,applyAdminUserPage,readAdm
 
 const BANK_SCHEMA='unisgiunglalab.quizlab.bank';
 const BACKUP_SCHEMA='unisgiunglalab.quizlab.backup';
-const APP_VERSION='0.11.27';
+const APP_VERSION='0.11.28';
 const sync=new QuizLabSyncAdapter();
 const app=document.getElementById('app');
 const picker=document.getElementById('filePicker');
@@ -37,13 +37,13 @@ let searchLimit=30;
 let studyTelemetryAt=0,studyTelemetryClean=null;
 let studyOverview=null,studyBackgroundBusy=false,studyOverviewUser=null;
 async function studyRequest(path,body){
- const userId=cloudState.user?.id;if(!userId||!sync.client)throw new Error('Accedi al tuo account LAB');
+ const userId=cloudState.user?.id;if(!userId||!sync.client)throw new Error('Accedi al tuo account UniSgiunglaLab');
  const result=await sync.client.auth.getSession(),token=result.data?.session?.access_token;
  if(!token)throw new Error('Verifica online necessaria per questa operazione');
  const config=globalThis.QUIZLAB_LAB_CONFIG;
- if(config?.mode!=='lab'||!/^http:\/\/127\.0\.0\.1:\d+$/.test(config.apiBase))throw new Error('Modulo disponibile nel LAB locale');
+ if(config?.mode!=='production'||!config.suiteBase)throw new Error('Modulo studio non configurato');
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
- try{const response=await fetch(config.apiBase+'/lab/study/'+path,{method:body===undefined?'GET':'POST',signal:controller.signal,headers:{Authorization:'Bearer '+token,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})}),value=await response.json();
+ try{const response=await fetch(config.suiteBase+'/study/'+path,{method:body===undefined?'GET':'POST',signal:controller.signal,headers:{Authorization:'Bearer '+token,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})}),value=await response.json();
   if(userId!==cloudState.user?.id)throw new Error('Account cambiato');if(!response.ok)throw Object.assign(new Error(value.message||'Operazione non riuscita'),{status:response.status});return value;
  }finally{clearTimeout(timer);}
 }
@@ -59,7 +59,7 @@ async function refreshStudyBell(){
  try{const value=await studyRequest('unread');for(const el of document.querySelectorAll('[data-study-unread]'))el.textContent=value.unread?'('+value.unread+')':'';}catch{}
 }
 async function openStudyPanel(tab='goals'){
- if(!cloudState.user)throw new Error('Accedi prima al tuo account LAB');await studyHeartbeat();
+ if(!cloudState.user)throw new Error('Accedi prima al tuo account UniSgiunglaLab');await studyHeartbeat();
  return globalThis.QuizLabStudyUI.open({host:document.body,request:studyRequest,accountId:cloudState.user.id,deviceId:store.sync.clientId,tab,theme:currentTheme,platform:'pwa',currentAccount:()=>cloudState.user?.id,canStudy:featuresAllowed,onChange:()=>studyRefreshBackground().catch(()=>{}),pushDiagnostics:()=>collectPushDiagnostics(cloudState.user.id),
   navigate:({courseId,questionIds})=>{if(!featuresAllowed()||!store.courses[courseId])return;route={name:'dashboard',courseId};const c=course();const ids=questionIds?.length?questionIds:c.pendingReview;const by=new Map(qbank(c).map(q=>[q.id,q]));if(ids.length){startSession(ids.map(id=>by.get(id)).filter(Boolean),'Ripasso intelligente','review');if(session){session.reviewPolicy='clear-on-correct';recordStudyReviewFromNotification();}}else render();}});
 }
@@ -339,7 +339,7 @@ function bottomNavHtml(){
  return '<nav class="mobile-bottom-nav">'+item('home','Home','⌂',['home'])+item('profile','Profilo','◉',['profile'])+item('cloud','Cloud','☁',['cloud','access'])+(accessState.isAdmin?item('open-admin','Admin','🛡',['admin']):'')+'</nav>';
 }
 function page(body,title='QuizLab · Sgiungla',sub='Mobile · offline-first',back=false){app.innerHTML='<div class="app-frame">'+top(title,sub,back)+'<main class="main">'+((route.name==='home'||route.name==='dashboard')&&featuresAllowed()?'<div data-study-summary>'+studySummaryHtml()+'</div>':'')+body+'</main>'+bottomNavHtml()+'</div>';}
-function setRoute(name,courseId=route.courseId){if(examTimer){clearInterval(examTimer);examTimer=null;}route={name,courseId};session=null;render();}
+function setRoute(name,courseId=route.courseId){if(name==='admin'){location.assign('./admin.html');return;}if(examTimer){clearInterval(examTimer);examTimer=null;}route={name,courseId};session=null;render();}
 
 function home(){
  const rows=Object.entries(store.courses||{}).map(([id,c])=>[id,shape(c)]).filter(([,c])=>qbank(c).length||c.attempts.length).sort((a,b)=>a[1].subject.localeCompare(b[1].subject));
@@ -1136,7 +1136,8 @@ async function handleAdminUsersAction(action,userId){
  await refreshAdminData({usersOnly:true});
 }
 function localAdminMonitorAllowed(){return !!sync.session?.offlineIdentity&&baseAccessAllowed()&&globalThis.UniSgiunglaLicense?.status?.().isAdmin===true&&globalThis.UniSgiunglaLicense.status().userId===cloudState.user?.id;}
-function adminPage(){
+function adminPage(){location.assign('./admin.html#cloud');return;
+
  if(!baseAccessAllowed())return licensePage();
  if(localAdminMonitorAllowed()){layout('<section class="card"><h3>Cloud temporaneamente indisponibile</h3><p>Ultima lettura egress conservata. Le operazioni amministrative richiedono una verifica online.</p></section><section class="card" data-egress-host></section>','Admin','Monitor in sola lettura',true);Promise.resolve().then(mountEgress);return;}
  if(!accessState.isAdmin)return setRoute('home',null);
@@ -1421,7 +1422,7 @@ if(a==='back'){
 if(a==='profile'){setRoute('profile',route.courseId);return;}
 if(a==='cloud'){setRoute('cloud',route.courseId);return;}
 if(a==='save-cloud-config'){
- toast('Configurazione LAB locale fissata nella build');return;
+ toast('Il collegamento cloud è già configurato.');return;
 }
 if(a==='reset-cloud-config'){delete store.settings.supabaseUrl;delete store.settings.supabasePublishableKey;await saveStore(store);cloudState={status:'local-only',user:null};cloudPage();return;}
 if(a==='sign-up'){
@@ -1565,7 +1566,8 @@ app.addEventListener('keydown',async event=>{if(event.key!=='Enter'||event.targe
 
 picker.addEventListener('change',async()=>{const f=picker.files?.[0];if(!f)return;const op=captureOperation();try{if(f.size>25*1024*1024)throw new Error('File troppo grande: massimo 25 MB');const raw=await f.text();requireOperation(op);const msg=await importPack(JSON.parse(raw));requireOperation(op);toast('Importazione OK · '+msg);render();}catch(e){if(e?.code!=='STALE_WORKSPACE')alert('Importazione non riuscita:\n'+(e?.message||e));}});
 
-async function openAdminFromLocation(){
+async function openAdminFromLocation(){if(new URL(location.href).searchParams.get('admin')==='1'){location.replace('./admin.html#cloud');return true;}
+
  if(new URL(location.href).searchParams.get('admin')!=='1'||!cloudState.user||!accessState.isAdmin||accessState.status!=='active'||!featuresAllowed())return false;
  if(route.name==='admin'&&adminData.loaded)return true;
  const op=captureOperation();

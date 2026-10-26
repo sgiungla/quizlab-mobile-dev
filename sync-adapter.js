@@ -253,7 +253,7 @@ export class QuizLabSyncAdapter {
   async cloudFetch(input,init={}){
     let endpoint=new URL(typeof input==='string'?input:input.url);
     if(endpoint.pathname==='/rest/v1/rpc/quizlab_license'){endpoint=new URL('/functions/v1/quizlab-runtime/license',endpoint);input=endpoint.href;}
-    if(!["https://eqrcdvhhfrkpmnzqoerr.supabase.co"].includes(endpoint.origin)||endpoint.username||endpoint.password)throw new Error('LAB: endpoint cloud remoto bloccato');
+    if(!["https://eqrcdvhhfrkpmnzqoerr.supabase.co"].includes(endpoint.origin)||endpoint.username||endpoint.password)throw new Error('Collegamento cloud non consentito');
     const authRequest=endpoint.pathname.startsWith('/auth/v1/');
     let backoff;try{backoff=JSON.parse(globalThis.localStorage?.getItem(this.transportRetryKey)||'null');}catch{}
     if(backoff?.endpoint===endpoint.origin&&Date.now()<backoff.until){
@@ -308,7 +308,7 @@ export class QuizLabSyncAdapter {
     if(this.recoveryListener){globalThis.removeEventListener?.('online',this.recoveryListener);globalThis.removeEventListener?.('focus',this.recoveryListener);globalThis.removeEventListener?.('storage',this.identityListener);}
     const settings=context.settings||{};
     const endpoint=new URL(settings.supabaseUrl||globalThis.QUIZLAB_LAB_CONFIG?.supabaseUrl||'http://127.0.0.1:54321');
-    if(!["https://eqrcdvhhfrkpmnzqoerr.supabase.co"].includes(endpoint.origin)||endpoint.username||endpoint.password)throw new Error('LAB: endpoint cloud remoto bloccato');
+    if(!["https://eqrcdvhhfrkpmnzqoerr.supabase.co"].includes(endpoint.origin)||endpoint.username||endpoint.password)throw new Error('Collegamento cloud non consentito');
     if(!this.configured(settings) || !globalThis.supabase?.createClient){
       this.status='local-only';
       return {status:this.status,provider:this.provider,online:navigator.onLine,user:null};
@@ -443,7 +443,7 @@ export class QuizLabSyncAdapter {
     if(error) throw this.httpError(error,httpStatus);
     this.assertOperation(token);
     const base=this.authContext?.settings?.supabaseUrl||this.client?.supabaseUrl||globalThis.QUIZLAB_LAB_CONFIG?.supabaseUrl||'http://127.0.0.1:54321';
-    if(data?.signedUrl&&(new URL(data.signedUrl).origin!==new URL(base).origin||new URL(data.signedUrl).username||new URL(data.signedUrl).password))throw new Error('LAB: avatar remoto bloccato');
+    if(data?.signedUrl&&(new URL(data.signedUrl).origin!==new URL(base).origin||new URL(data.signedUrl).username||new URL(data.signedUrl).password))throw new Error('Collegamento avatar non consentito');
     return data?.signedUrl||'';
   }
 

@@ -1,10 +1,3 @@
-# QuizLab 0.11.27
+# UniSgiunglaLab 0.11.28
 
-PWA: https://sgiungla.github.io/quizlab-mobile-dev/
-Amministrazione: https://sgiungla.github.io/quizlab-mobile-dev/admin.html
-
-Cache locale, sincronizzazione per revisioni e verifica firmata valida per massimo24ore. Il database IndexedDB precedente viene mantenuto.
-
-Notifiche/obiettivi sperimentali e acquisti simulati restano nel LAB: non sono servizi di questa release. Nessun addebito viene effettuato da questo pannello.
-
-Per passare da0.10.18 chiudere tutte le finestre dellaPWA e riaprire con rete disponibile. Non cancellare dati del sito o reinstallare per aggiornare.
+Studio, obiettivi, esami, ripasso, traguardi, notifiche interne e Web Push; gestione account, moduli, materie e comunicazioni in admin.html. Vetrina e ordini senza addebiti. Stripe non collegato. Dati locali e identità della 0.11.27 conservati.
