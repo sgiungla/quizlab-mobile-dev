@@ -339,7 +339,7 @@ function bottomNavHtml(){
  return '<nav class="mobile-bottom-nav">'+item('home','Home','⌂',['home'])+item('profile','Profilo','◉',['profile'])+item('cloud','Cloud','☁',['cloud','access'])+(accessState.isAdmin?item('open-admin','Admin','🛡',['admin']):'')+'</nav>';
 }
 function page(body,title='QuizLab · Sgiungla',sub='Mobile · offline-first',back=false){app.innerHTML='<div class="app-frame">'+top(title,sub,back)+'<main class="main">'+((route.name==='home'||route.name==='dashboard')&&featuresAllowed()?'<div data-study-summary>'+studySummaryHtml()+'</div>':'')+body+'</main>'+bottomNavHtml()+'</div>';}
-function setRoute(name,courseId=route.courseId){if(name==='admin'){location.assign('./admin.html');return;}if(examTimer){clearInterval(examTimer);examTimer=null;}route={name,courseId};session=null;render();}
+function setRoute(name,courseId=route.courseId){if(name==='admin'&&!localAdminMonitorAllowed()){location.assign('./admin.html');return;}if(examTimer){clearInterval(examTimer);examTimer=null;}route={name,courseId};session=null;render();}
 
 function home(){
  const rows=Object.entries(store.courses||{}).map(([id,c])=>[id,shape(c)]).filter(([,c])=>qbank(c).length||c.attempts.length).sort((a,b)=>a[1].subject.localeCompare(b[1].subject));
@@ -1136,10 +1136,10 @@ async function handleAdminUsersAction(action,userId){
  await refreshAdminData({usersOnly:true});
 }
 function localAdminMonitorAllowed(){return !!sync.session?.offlineIdentity&&baseAccessAllowed()&&globalThis.UniSgiunglaLicense?.status?.().isAdmin===true&&globalThis.UniSgiunglaLicense.status().userId===cloudState.user?.id;}
-function adminPage(){location.assign('./admin.html#cloud');return;
+function adminPage(){if(!localAdminMonitorAllowed()){location.assign('./admin.html#cloud');return;}
 
  if(!baseAccessAllowed())return licensePage();
- if(localAdminMonitorAllowed()){layout('<section class="card"><h3>Cloud temporaneamente indisponibile</h3><p>Ultima lettura egress conservata. Le operazioni amministrative richiedono una verifica online.</p></section><section class="card" data-egress-host></section>','Admin','Monitor in sola lettura',true);Promise.resolve().then(mountEgress);return;}
+ if(localAdminMonitorAllowed()){page('<section class="card"><h3>Cloud temporaneamente indisponibile</h3><p>Ultima lettura egress conservata. Le operazioni amministrative richiedono una verifica online.</p></section><section class="card" data-egress-host></section>','Admin','Monitor in sola lettura',true);Promise.resolve().then(mountEgress);return;}
  if(!accessState.isAdmin)return setRoute('home',null);
  const list=ensureAdminUsers(),summary=list.data.summary||{},storage=adminData.storage||{},courses=adminData.courses||[],retiredCourses=adminData.retiredCourses||[];
  const globalCourseRows=[...courses].sort((a,b)=>String(a.subject).localeCompare(String(b.subject))).map(course=>
@@ -1566,7 +1566,7 @@ app.addEventListener('keydown',async event=>{if(event.key!=='Enter'||event.targe
 
 picker.addEventListener('change',async()=>{const f=picker.files?.[0];if(!f)return;const op=captureOperation();try{if(f.size>25*1024*1024)throw new Error('File troppo grande: massimo 25 MB');const raw=await f.text();requireOperation(op);const msg=await importPack(JSON.parse(raw));requireOperation(op);toast('Importazione OK · '+msg);render();}catch(e){if(e?.code!=='STALE_WORKSPACE')alert('Importazione non riuscita:\n'+(e?.message||e));}});
 
-async function openAdminFromLocation(){if(new URL(location.href).searchParams.get('admin')==='1'){location.replace('./admin.html#cloud');return true;}
+async function openAdminFromLocation(){if(new URL(location.href).searchParams.get('admin')==='1'){if(localAdminMonitorAllowed()){route={name:'admin',courseId:null};session=null;return true;}location.replace('./admin.html#cloud');return true;}
 
  if(new URL(location.href).searchParams.get('admin')!=='1'||!cloudState.user||!accessState.isAdmin||accessState.status!=='active'||!featuresAllowed())return false;
  if(route.name==='admin'&&adminData.loaded)return true;

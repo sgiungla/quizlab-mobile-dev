@@ -91,6 +91,7 @@ export class QuizLabSyncAdapter {
     this.remoteSnapshotCache=null;
     this.lastAuthHttpStatus=0;
     this.transportRetryKey='quizlab.transport-retry.v1';
+    this.offlineAutoRefreshDisabled=false;
   }
 
   invalidateRemoteCache(courseId=null){
@@ -173,6 +174,10 @@ export class QuizLabSyncAdapter {
     return ['AuthRetryableFetchError','TimeoutError','AbortError'].includes(error.name) || (error.name==='TypeError' && /fetch|network|load failed/i.test(error.message||''));
   }
 
+  transportBlock(){
+    try{const r=JSON.parse(globalThis.localStorage?.getItem(this.transportRetryKey)||'null'),origin=new URL(this.authContext?.settings?.supabaseUrl||globalThis.QUIZLAB_LAB_CONFIG?.supabaseUrl).origin;return r?.endpoint===origin&&Number.isFinite(r.until)&&r.until>Date.now()&&[0,402,408,425,429,500,502,503,504].includes(r.status)?r:null;}catch{return null;}
+  }
+
   httpError(error,status){
     // PostgREST exposes HTTP status beside error, not necessarily inside it.
     // Keep quota outages distinct from an explicit authentication denial.
@@ -215,6 +220,7 @@ export class QuizLabSyncAdapter {
   applyAuthSession(event,session,{preserveIdentity=false}={}){
     if(event==='INITIAL_SESSION' && !session && this.session?.offlineIdentity && this.offlineIdentityGeneration===this.generation)return;
     if(this.signedOutLocally && session)return;
+    if(session&&this.offlineAutoRefreshDisabled){this.offlineAutoRefreshDisabled=false;this.client?.auth?.startAutoRefresh?.();}
     if(this.user()?.id!==session?.user?.id || ['SIGNED_OUT','SIGNED_IN'].includes(event))this.generation++;
     const cached=!session&&!this.signedOutLocally?this.cachedIdentity():null;
     const localIdentity=cached?.id===this.user()?.id?cached:null;
@@ -227,6 +233,7 @@ export class QuizLabSyncAdapter {
 
   async recoverSession(){
     if(!this.client || !this.session?.offlineIdentity || this.signedOutLocally)return !this.session?.offlineIdentity;
+    if(this.transportBlock())return false;
     if(this.recovery)return this.recovery;
     const client=this.client,run=this.startGeneration,token=this.operationToken();
     this.recovery=(async()=>{
@@ -239,6 +246,7 @@ export class QuizLabSyncAdapter {
         this.clearAuthStorage();this.applyAuthSession('SIGNED_OUT',null,{preserveIdentity:true});return false;
       }
       const session=result.data?.session||null;
+      if(!session)return false;
       if(session&&session.user?.id!==token.userId)return false;
       this.applyAuthSession(session?.user?.id===token.userId?'TOKEN_REFRESHED':'SIGNED_IN',session);
       return !!session;
@@ -313,15 +321,17 @@ export class QuizLabSyncAdapter {
       this.status='local-only';
       return {status:this.status,provider:this.provider,online:navigator.onLine,user:null};
     }
+    const block=this.transportBlock(),offlineBoot=!!block&&!!this.cachedIdentity()&&!this.signedOutLocally;
+    this.offlineAutoRefreshDisabled=offlineBoot;
     this.client=globalThis.supabase.createClient(
       settings.supabaseUrl,
       settings.supabasePublishableKey,
-      {auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true,storage:this.authStorage()},
+      {auth:{persistSession:true,autoRefreshToken:!offlineBoot,detectSessionInUrl:true,storage:this.authStorage()},
         global:{fetch:(input,init)=>this.cloudFetch(input,init)}}
     );
     const client=this.client;
     let result;
-    try{result=await client.auth.getSession();}catch(error){result={error};}
+    try{result=offlineBoot?{error:Object.assign(new Error('Cloud temporaneamente indisponibile; identità locale conservata'),{status:block.status})}:await client.auth.getSession();}catch(error){result={error};}
     if(result.error&&!Number(result.error.status)&&this.lastAuthHttpStatus>=400)result.error.status=this.lastAuthHttpStatus;
     if(run!==this.startGeneration || !this.isOperationCurrent(token))throw new Error('Operazione annullata: account cambiato');
     if(result.error){
