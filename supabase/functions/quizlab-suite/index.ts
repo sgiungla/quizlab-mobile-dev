@@ -69,12 +69,12 @@ async function handle(req:Request){
    const offset=Number(u.searchParams.get('offset')||0);if(!Number.isInteger(offset)||offset<0||offset>100000)throw Object.assign(Error('Pagina non valida'),{status:400});
    const get:Record<string,()=>any>={
     'study/preferences':()=>study.prefs(id),'study/dashboard':()=>study.dashboard(id),'study/devices':()=>study.listDevices(id),
-    'study/summary':()=>study.summary(id),'study/unread':async()=>({unread:(await study.inbox(id)).unread}),
+    'study/summary':()=>study.summary(id),'study/unread':()=>study.unread(id),
     'study/inbox':()=>study.inbox(id,{offset,archived:u.searchParams.get('archived')==='true'}),
     'study/push-config':()=>study.publicConfig(),'study/campaign-options':()=>study.campaignOptions(id),'study/admin':()=>study.report(id,offset),
     'commerce/catalog':()=>commerce.catalog(),'commerce/orders':()=>commerce.orders(id,{all:u.searchParams.get('all')==='true',offset}),
     'commerce/library':()=>commerce.library(id),'commerce/products':()=>commerce.products(id),
-    'admin/traffic':async()=>{if(!await lab.rpc(id,'quizlab_is_admin'))throw Object.assign(Error('Amministratore richiesto'),{status:403});return{source:'server-logical-response-bytes',estimate:true,officialEgress:false,rows:(await db.query("select day,route,requests,response_bytes,database_logical_bytes,errors,last_at from quizlab_release_private.suite_traffic where day>=current_date-31 order by day desc,route")).rows,scheduler:(await db.query('select enabled,last_run,lease_until from quizlab_release_private.suite_scheduler where singleton')).rows[0]};}
+    'admin/traffic':async()=>{if(!await lab.rpc(id,'quizlab_is_admin'))throw Object.assign(Error('Amministratore richiesto'),{status:403});return{source:'server-logical-response-bytes',estimate:true,officialEgress:false,rows:(await db.query("select day,route,requests,response_bytes,database_logical_bytes,last_response_bytes,last_database_logical_bytes,errors,last_at from quizlab_release_private.suite_traffic where day>=current_date-31 order by day desc,route")).rows,scheduler:(await db.query('select enabled,last_run,lease_until from quizlab_release_private.suite_scheduler where singleton')).rows[0]};}
    };
    const post:Record<string,()=>any>={
     'study/preferences':()=>study.savePreferences(id,input),'study/item':()=>study.saveItem(id,input),'study/device':()=>study.registerDevice(id,input),
@@ -90,7 +90,7 @@ async function handle(req:Request){
  }catch(e:any){status=e.status||(/^23/.test(e.code||'')?409:503);data={message:status<500?e.message:'Servizio temporaneamente non disponibile. I dati locali restano conservati.'};console.warn('QuizLab suite',route,status,e.code||e.name);}
  const json=JSON.stringify(data),bytes=new TextEncoder().encode(json).byteLength;
  // Aggregate sizes only: never store request bodies, tokens, endpoints or student text in traffic logs.
- if(route!=='tick'||status===200)try{await db.query("insert into quizlab_release_private.suite_traffic(day,route,requests,response_bytes,database_logical_bytes,errors)values(current_date,$1,1,$2,$3,$4)on conflict(day,route)do update set requests=suite_traffic.requests+1,response_bytes=suite_traffic.response_bytes+excluded.response_bytes,database_logical_bytes=suite_traffic.database_logical_bytes+excluded.database_logical_bytes,errors=suite_traffic.errors+excluded.errors,last_at=now()",[/^(study|commerce|admin)\/[a-z-]+$/.test(route)?route:route==='tick'?'tick':'unknown',bytes,m.bytes,status>=400?1:0]);}catch{}
+ if(route!=='tick'||status===200)try{await db.query("insert into quizlab_release_private.suite_traffic(day,route,requests,response_bytes,database_logical_bytes,errors,last_response_bytes,last_database_logical_bytes)values(current_date,$1,1,$2,$3,$4,$2,$3)on conflict(day,route)do update set requests=suite_traffic.requests+1,response_bytes=suite_traffic.response_bytes+excluded.response_bytes,database_logical_bytes=suite_traffic.database_logical_bytes+excluded.database_logical_bytes,errors=suite_traffic.errors+excluded.errors,last_response_bytes=excluded.last_response_bytes,last_database_logical_bytes=excluded.last_database_logical_bytes,last_at=now()",[/^(study|commerce|admin)\/[a-z-]+$/.test(route)?route:route==='tick'?'tick':'unknown',bytes,m.bytes,status>=400?1:0]);}catch{}
  return new Response(json,{status,headers:cors(req)});
  });
 }

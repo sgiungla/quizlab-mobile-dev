@@ -76,16 +76,28 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
    await tx.query('insert into public.quizlab_notification_audit(actor_id,action,detail)values($1,\'preferences\',$2::jsonb)',[user,JSON.stringify({before:old?.settings||core.defaults(),after:settings})]);return result;
   });
  }
- async function snapshot(user){
+ function calculationGoal(goal){
+  if(goal.metric!=='recovery'||goal.baselineEncoding!=='json-pair-v1')return goal;
+  return{...goal,baseline:goal.baseline.map(value=>{const pair=JSON.parse(value);if(!Array.isArray(pair)||pair.length!==2||pair.some(v=>typeof v!=='string'))throw fail(409,'Riferimenti di recupero non validi');return pair[0]+'\u0000'+pair[1];})};
+ }
+ function goalValue(goal,s,now,zone){
+  const cached=s.goalProgress?.[hash(goal)];if(cached)return cached;
+  if(s.compact)throw fail(409,'Obiettivo aggiornato su un altro dispositivo: ricarica i dati');
+  return core.goalValue(calculationGoal(goal),s,now,zone);
+ }
+ const reviewCount=c=>c.reviewCount??c.review.length;
+ const pendingCount=c=>c.pendingCount??c.pending.length;
+ async function snapshot(user,{details=false,interactive=false}={}){
   const preference=await prefs(user),now=clock();
   const metadata=(await db.query(`select b.id,b.course_id,b.subject,b.bank_revision,b.updated_at as bank_at,p.revision,p.updated_at
     from public.quizlab_banks b left join public.quizlab_user_courses p on p.bank_id=b.id and p.user_id=$1
     where b.owner_id=$1 and not exists(select 1 from public.quizlab_retired_courses r where r.course_id=b.course_id)
     and not exists(select 1 from public.quizlab_user_deleted_courses d where d.user_id=$1 and d.course_id=b.course_id) order by b.id`,[user])).rows;
-  const signature=hash({metadata,timeZone:preference.settings.timeZone,minute:Math.floor(now.getTime()/60000)});
-  const cached=(await db.query('select signature,data from quizlab_release_private.suite_study_cache where user_id=$1',[user])).rows[0];
+  const goalItems=await items(user,'goal');
+  const signature=hash({metadata,goals:goalItems.map(i=>[i.item_id,i.revision]),timeZone:preference.settings.timeZone,day:core.localParts(now,preference.settings.timeZone).day});
+  const cached=(await db.query(`select signature,case when $2 then data else jsonb_set(data,'{courses}',coalesce((select jsonb_agg((c-'review'-'pending')||jsonb_build_object('reviewCount',jsonb_array_length(c->'review'),'pendingCount',jsonb_array_length(c->'pending'),'review','[]'::jsonb,'pending','[]'::jsonb)) from jsonb_array_elements(data->'courses') c),'[]'::jsonb)) end as data from quizlab_release_private.suite_study_cache where user_id=$1`,[user,details])).rows[0];
   let data;
-  if(cached?.signature===signature)data=cached.data;
+  if(cached?.signature===signature&&cached.data.compact&&(!interactive||now-Date.parse(cached.data.computedAt)<900000))data=cached.data;
   else {
    // Explanations, options and source documents never leave Postgres for a study summary.
    const rows=(await db.query(`select b.course_id,b.subject,b.bank_revision,b.updated_at as bank_at,p.revision,p.updated_at,
@@ -96,6 +108,9 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
     from public.quizlab_banks b left join public.quizlab_user_courses p on p.bank_id=b.id and p.user_id=$1
     where b.id=any($2::uuid[]) order by b.id`,[user,metadata.map(r=>r.id)])).rows;
    data=core.summarize(rows,now,preference.settings.timeZone);
+   data.goalProgress=Object.fromEntries(goalItems.map(i=>[hash(i.data),core.goalValue(calculationGoal(i.data),data,now,preference.settings.timeZone)]));
+   for(const c of data.courses){c.examCount=c.exams.length;delete c.attempts;delete c.exams;}
+   data.compact=true;
    data.consolidatedAt=rows.reduce((m,r)=>r.updated_at&&new Date(r.updated_at).toISOString()>m?new Date(r.updated_at).toISOString():m,'');
    await db.query('insert into quizlab_release_private.suite_study_cache(user_id,signature,data) values($1,$2,$3::jsonb) on conflict(user_id) do update set signature=excluded.signature,data=excluded.data,consolidated_at=now()',[user,signature,JSON.stringify(data)]);
   }
@@ -108,7 +123,7 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
  async function items(user,kind){return(await db.query('select item_id,kind,revision,data,updated_at from public.quizlab_study_items where user_id=$1 and not deleted'+(kind?' and kind=$2':'')+' order by updated_at desc',kind?[user,kind]:[user])).rows;}
  async function saveItem(user,input){
   await requireStudy(user);uuid(input.item_id);if(!['goal','exam'].includes(input.kind))throw fail(400,'Tipo non valido');
-  const data=input.data||{},snap=await snapshot(user);
+  const data=input.data||{},snap=await snapshot(user,{details:input.data?.metric==='recovery'});
   if(data.courseId&&!snap.courses.some(c=>c.courseId===data.courseId))throw fail(400,'Materia non disponibile nel tuo account');
   let cleaned;
   if(input.kind==='goal'){
@@ -117,7 +132,7 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
     startDate:data.startDate?date(data.startDate):core.localParts(clock(),(await prefs(user)).settings.timeZone).day,deadline:data.deadline?date(data.deadline):null,
     minSample:data.metric==='accuracy'?num(Number(data.minSample||30),30,100000):data.metric==='examAverage'?num(Number(data.minSample||3),3,5):1,paused:!!data.paused};
    if(cleaned.deadline&&cleaned.deadline<cleaned.startDate)throw fail(400,'Scadenza precedente all’inizio');
-   if(data.metric==='recovery')cleaned.baseline=snap.courses.filter(c=>!data.courseId||c.courseId===data.courseId).flatMap(c=>c.pending.map(q=>c.courseId+'\u0000'+q));
+   if(data.metric==='recovery'){cleaned.baseline=snap.courses.filter(c=>!data.courseId||c.courseId===data.courseId).flatMap(c=>c.pending.map(q=>JSON.stringify([c.courseId,String(q)])));cleaned.baselineEncoding='json-pair-v1';}
   }else{
    if(!data.courseId)throw fail(400,'Seleziona la materia dell’esame');
    if(data.time&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(data.time))throw fail(400,'Ora non valida');
@@ -128,7 +143,7 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
    if(!old&&(await tx.query('select count(*)::integer as n from public.quizlab_study_items where user_id=$1 and not deleted',[user])).rows[0].n>=500)throw fail(400,'Limite di 500 obiettivi ed esami attivi raggiunto');
    if(old&&(old.user_id!==user||old.kind!==input.kind))throw fail(403,'Elemento non disponibile');
    if(Number(input.expected_revision)!==Number(old?.revision||0))throw fail(409,'Elemento cambiato: ricarica prima di modificarlo');
-   if(old?.data?.baseline&&old.data.metric===cleaned.metric&&old.data.courseId===cleaned.courseId)cleaned.baseline=old.data.baseline;
+   if(old?.data?.baseline&&old.data.metric===cleaned.metric&&old.data.courseId===cleaned.courseId){cleaned.baseline=old.data.baseline;if(old.data.baselineEncoding)cleaned.baselineEncoding=old.data.baselineEncoding;else delete cleaned.baselineEncoding;}
    if(cleaned.metric==='recovery'&&!cleaned.baseline.length&&!input.deleted)throw fail(400,'Non ci sono errori da recuperare nella materia selezionata');
    const row=(await tx.query('insert into public.quizlab_study_items(item_id,user_id,kind,data,deleted) values($1,$2,$3,$4::jsonb,$5) on conflict(item_id) do update set data=excluded.data,deleted=excluded.deleted,revision=quizlab_study_items.revision+1,updated_at=now() returning *',[input.item_id,user,input.kind,JSON.stringify(cleaned),!!input.deleted])).rows[0];
    await tx.query("update public.quizlab_notifications set state='cancelled' where user_id=$1 and state in ('queued','ready') and context->>'itemId'=$2",[user,input.item_id]);return row;
@@ -166,32 +181,51 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
  }
  async function enqueue(user,event){
   const p=(await prefs(user)).settings;if(!event.essential&&!p.categories[event.category]||event.category==='marketing'&&!p.marketingConsent)return null;
-  return(await db.query(`insert into public.quizlab_notifications(notification_id,user_id,event_key,category,title,message,destination,essential,automatic,priority,context,due_at,expires_at)
-   values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13)on conflict(user_id,event_key)do nothing returning notification_id`,[randomUUID(),user,event.key,event.category,event.title,event.message,event.destination||'./?study=inbox',!!event.essential,!!event.automatic,event.priority||1,JSON.stringify(event.context||{}),event.due||clock(),event.expires||new Date(clock().getTime()+86400000)])).rows[0]?.notification_id||null;
+  return(await db.query(`insert into public.quizlab_notifications(notification_id,user_id,event_key,category,title,message,destination,essential,automatic,priority,context,due_at,expires_at,next_check_at)
+   values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14)on conflict(user_id,event_key)do nothing returning notification_id`,[randomUUID(),user,event.key,event.category,event.title,event.message,event.destination||'./?study=inbox',!!event.essential,!!event.automatic,event.priority||1,JSON.stringify(event.context||{}),event.due||clock(),event.expires||new Date(clock().getTime()+86400000),clock()])).rows[0]?.notification_id||null;
  }
+ async function generationInfo(user){
+  return(await db.query(`select md5(jsonb_build_object(
+   'day',to_char($2::timestamptz at time zone coalesce(np.settings->>'timeZone','Europe/Rome'),'YYYY-MM-DD'),
+   'banks',(select jsonb_agg(jsonb_build_array(b.id,b.course_id,b.bank_revision,b.updated_at,p.revision,p.updated_at) order by b.id) from public.quizlab_banks b left join public.quizlab_user_courses p on p.bank_id=b.id and p.user_id=$1 where b.owner_id=$1),
+   'items',(select jsonb_agg(jsonb_build_array(item_id,revision,deleted) order by item_id) from public.quizlab_study_items where user_id=$1),
+   'access',(select jsonb_build_array(status,expires_at,starts_at,license_revision,coalesce(expires_at>$2,true),coalesce(starts_at<=$2,true)) from public.quizlab_user_access where user_id=$1),
+   'automations',(select max(updated_at) from public.quizlab_notification_automations),
+   'preferences',np.revision,
+   'retired',(select jsonb_agg(course_id order by course_id) from public.quizlab_retired_courses),
+   'deleted',(select jsonb_agg(course_id order by course_id) from public.quizlab_user_deleted_courses where user_id=$1),
+   'devices',(select jsonb_agg(jsonb_build_array(device_id,clean,enabled,permission,endpoint_hash,last_seen<=$2 and last_seen>$2-interval '120 seconds') order by device_id) from public.quizlab_notification_devices where user_id=$1),
+   'writers',(select jsonb_agg(client_id order by client_id) from public.quizlab_devices where user_id=$1)
+   )::text) as signature,g.signature as previous from (select $1::uuid as user_id) x
+   left join public.quizlab_notification_preferences np using(user_id) left join quizlab_release_private.suite_generation g using(user_id)`,[user,clock()])).rows[0];
+ }
+ async function generationDone(user,signature){await db.query('insert into quizlab_release_private.suite_generation(user_id,signature,evaluated_at) values($1,$2,$3) on conflict(user_id)do update set signature=excluded.signature,evaluated_at=excluded.evaluated_at',[user,signature,clock()]);}
  async function generate(user){
-  if(!(await access(user)).study)return;const p=(await prefs(user)).settings,s=await snapshot(user),rows=await items(user),autos=await automationRows();
+  const fingerprint=await generationInfo(user);if(fingerprint.signature===fingerprint.previous)return false;
+  if(!(await access(user)).study){await generationDone(user,fingerprint.signature);return false;}const p=(await prefs(user)).settings,s=await snapshot(user),rows=await items(user),autos=await automationRows();
   const name=(await db.query('select display_name from public.quizlab_profiles where user_id=$1',[user])).rows[0]?.display_name||'studente';
   async function auto(id,key,values,context={},urgent=false){const a=autos.find(a=>a.automation_id===id).config;if(!a.enabled)return;
    const merged={nome_utente:name,...values};try{await enqueue(user,{key,category:a.category,title:template(a.title,merged),message:template(a.message,merged),automatic:true,priority:a.priority,context:{automation:id,dailyLimit:a.dailyLimit,frequencyDays:a.frequencyDays,...context},destination:context.courseId?'./?study=review&course='+encodeURIComponent(context.courseId):'./?study=goals'});}catch(e){await audit(null,'template_failed',{automation:id,message:e.message});}}
   for(const item of rows){
    if(item.kind==='goal'){
-    const g=core.goalValue(item.data,s,clock(),p.timeZone),ctx={itemId:item.item_id,revision:item.revision,periodKey:g.periodKey};
+    const g=goalValue(item.data,s,clock(),p.timeZone),ctx={itemId:item.item_id,revision:item.revision,periodKey:g.periodKey};
     if(g.status==='active')await auto('goal_reminder','goal-reminder:'+item.item_id+':'+g.periodKey+':'+Math.floor(core.dayNumber(s.today)/autos.find(a=>a.automation_id==='goal_reminder').config.frequencyDays),{obiettivo:item.data.title},ctx);
     if(g.status==='active'&&item.data.deadline){const days=core.dayNumber(item.data.deadline)-core.dayNumber(s.today);if(autos.find(a=>a.automation_id==='goal_deadline').config.intervals.includes(days))await auto('goal_deadline','goal-deadline:'+item.item_id+':'+item.revision+':'+days,{obiettivo:item.data.title,giorni_obiettivo:days},{...ctx,deadlineDays:days});}
     if(s.fresh&&(g.status==='achieved'||g.status==='active')){const thresholds=autos.find(a=>a.automation_id==='goal_progress').config.thresholds.filter(t=>t<=g.percent);const threshold=Math.max(...thresholds,0);if(threshold)await auto('goal_progress','goal-progress:'+item.item_id+':'+g.periodKey+':'+threshold,{obiettivo:item.data.title},{...ctx,threshold});}
    }else if(!item.data.cancelled&&p.countdowns){const days=core.examDays(item.data,clock(),p.timeZone),a=autos.find(a=>a.automation_id==='exam').config,c=s.courses.find(c=>c.courseId===item.data.courseId);if(c&&a.intervals.includes(days)&&(!p.courseIds.length||p.courseIds.includes(c.courseId)))await auto('exam','exam:'+item.item_id+':'+item.revision+':'+days,{nome_materia:c.subject,giorni_esame:days,...(s.fresh?{percentuale_completamento:Math.round(c.coverage)}:{})},{itemId:item.item_id,revision:item.revision,days,courseId:c.courseId});}
   }
   for(const c of s.courses.filter(c=>!p.courseIds.length||p.courseIds.includes(c.courseId))){
-   if(c.review.length&&s.fresh)await auto('review','review:'+c.courseId+':'+Math.floor(core.dayNumber(s.today)/autos.find(a=>a.automation_id==='review').config.frequencyDays),{nome_materia:c.subject,domande_da_ripassare:c.review.length},{courseId:c.courseId});
+   if(reviewCount(c)&&s.fresh)await auto('review','review:'+c.courseId+':'+Math.floor(core.dayNumber(s.today)/autos.find(a=>a.automation_id==='review').config.frequencyDays),{nome_materia:c.subject,domande_da_ripassare:reviewCount(c)},{courseId:c.courseId});
   }
   if(p.inactivityDays&&s.lastStudyAt){const days=core.dayNumber(s.today)-core.dayNumber(core.localParts(new Date(s.lastStudyAt),p.timeZone).day);if(days>=p.inactivityDays)await auto('inactivity','inactive:'+s.lastStudyAt+':'+Math.floor((days-p.inactivityDays)/autos.find(a=>a.automation_id==='inactivity').config.frequencyDays),{...(s.fresh?{giorni_inattivita:days}:{})},{lastStudyAt:s.lastStudyAt});}
   const all=s.courses.reduce((n,c)=>n+c.unique,0),badges=[];for(const threshold of [100,500,1000])if(all>=threshold)badges.push(['unique:'+threshold,threshold+' domande diverse affrontate']);if(s.streak>=7)badges.push(['streak:7','7 giorni consecutivi']);
-  for(const c of s.courses){if(c.total&&c.unique===c.total)badges.push(['bank:'+c.courseId,'Banca completata: '+c.subject]);for(const t of [80,90])if(c.attemptCount>=100&&c.accuracy>=t)badges.push(['accuracy:'+c.courseId+':'+t,'Accuratezza '+t+'%: '+c.subject]);if(c.avg5!=null&&c.exams.length>=5&&c.avg5>=27)badges.push(['exam:'+c.courseId+':27','Media almeno 27/30: '+c.subject]);if(c.averageImprovement!=null&&c.averageImprovement>=3)badges.push(['exam-improvement:'+c.courseId+':3','Media migliorata di almeno 3 punti: '+c.subject]);if(c.recoveredAll)badges.push(['recovery:'+c.courseId,'Errori recuperati: '+c.subject]);}
+  for(const c of s.courses){if(c.total&&c.unique===c.total)badges.push(['bank:'+c.courseId,'Banca completata: '+c.subject]);for(const t of [80,90])if(c.attemptCount>=100&&c.accuracy>=t)badges.push(['accuracy:'+c.courseId+':'+t,'Accuratezza '+t+'%: '+c.subject]);if(c.avg5!=null&&c.examCount>=5&&c.avg5>=27)badges.push(['exam:'+c.courseId+':27','Media almeno 27/30: '+c.subject]);if(c.averageImprovement!=null&&c.averageImprovement>=3)badges.push(['exam-improvement:'+c.courseId+':3','Media migliorata di almeno 3 punti: '+c.subject]);if(c.recoveredAll)badges.push(['recovery:'+c.courseId,'Errori recuperati: '+c.subject]);}
   if(s.fresh)for(const [key,label]of badges){const result=await db.query("insert into public.quizlab_study_badges(user_id,badge_key,label,evidence)values($1,$2,$3,$4::jsonb)on conflict(user_id,badge_key)do update set evidence=excluded.evidence where quizlab_study_badges.evidence->>'verified' is distinct from 'true' returning badge_key",[user,key,label,JSON.stringify({consolidatedAt:s.consolidatedAt,verified:true})]);if(result.rows.length)await auto('badge','badge:'+key,{traguardo:label},{badge:key});}
   const revisions=(await db.query('select course_id,bank_revision,subject from public.quizlab_banks where owner_id=$1',[user])).rows,previous=(await db.query('select data from quizlab_release_private.suite_bank_revisions where user_id=$1',[user])).rows[0]?.data;
   if(previous)for(const r of revisions){const old=previous.find(x=>x.course_id===r.course_id);if(old&&Number(r.bank_revision)>Number(old.bank_revision))await auto('bank_update','bank:'+r.course_id+':'+r.bank_revision,{nome_materia:r.subject},{courseId:r.course_id});}
   await db.query('insert into quizlab_release_private.suite_bank_revisions(user_id,signature,data)values($1,$2,$3::jsonb)on conflict(user_id)do update set signature=excluded.signature,data=excluded.data,consolidated_at=now()',[user,hash(revisions),JSON.stringify(revisions)]);
+  await generationDone(user,fingerprint.signature);
+  await db.query("update public.quizlab_notifications set next_check_at=$2 where user_id=$1 and state in ('queued','ready') and not delivery_cancelled and expires_at>$2 and read_at is null and archived_at is null",[user,clock()]);return true;
  }
  async function pertinent(n,s,p){
   if(n.expires_at&&new Date(n.expires_at)<=clock())return false;
@@ -205,11 +239,11 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
   if(c.itemId){const item=(await items(n.user_id)).find(i=>i.item_id===c.itemId);if(!item||Number(item.revision)!==Number(c.revision))return false;
    if(item.data.courseId&&(!s.courses.some(x=>x.courseId===item.data.courseId)||p.courseIds.length&&!p.courseIds.includes(item.data.courseId)))return false;
    if(item.kind==='exam'){if(item.data.cancelled||!p.countdowns||core.examDays(item.data,clock(),p.timeZone)!==c.days)return false;}
-   else{const g=core.goalValue(item.data,s,clock(),p.timeZone);if(g.periodKey!==c.periodKey||['paused','expired','scheduled'].includes(g.status)||['goal_reminder','goal_deadline'].includes(c.automation)&&g.status==='achieved'||c.threshold&&(!g.valid||g.percent<c.threshold))return false;
+   else{const g=goalValue(item.data,s,clock(),p.timeZone);if(g.periodKey!==c.periodKey||['paused','expired','scheduled'].includes(g.status)||['goal_reminder','goal_deadline'].includes(c.automation)&&g.status==='achieved'||c.threshold&&(!g.valid||g.percent<c.threshold))return false;
     if(c.automation==='goal_deadline'&&(!item.data.deadline||core.dayNumber(item.data.deadline)-core.dayNumber(s.today)!==c.deadlineDays))return false;
     if(c.automation==='goal_progress'){const a=(await automationRows()).find(a=>a.automation_id===c.automation).config;if(Math.max(...a.thresholds.filter(t=>t<=g.percent),0)!==c.threshold)return false;}}}
   if(c.automation==='inactivity'&&(!p.inactivityDays||s.lastStudyAt!==c.lastStudyAt||!s.lastStudyAt||core.dayNumber(s.today)-core.dayNumber(core.localParts(new Date(s.lastStudyAt),p.timeZone).day)<p.inactivityDays))return false;
-  if(c.automation==='review'&&(!s.fresh||!s.courses.find(x=>x.courseId===c.courseId)?.review.length))return false;
+  if(c.automation==='review'&&(!s.fresh||!reviewCount(s.courses.find(x=>x.courseId===c.courseId)||{review:[]})))return false;
   if(c.campaignId){const campaign=(await db.query('select state,data,revision from public.quizlab_notification_campaigns where campaign_id=$1',[c.campaignId])).rows[0];if(!campaign||campaign.state==='cancelled'||Number(campaign.revision)!==Number(c.campaignRevision))return false;const current=await evaluateRecipients(campaign.data);if(!current.eligible.some(r=>r.id===n.user_id)){const reason=current.excluded.find(r=>r.id===n.user_id);return reason?.issues.some(i=>i.code==='sync_unverified')?null:false;}}
   return true;
  }
@@ -220,7 +254,7 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
   else if(context.automation){const a=(await automationRows()).find(a=>a.automation_id===context.automation).config;
    const name=(await db.query('select display_name from public.quizlab_profiles where user_id=$1',[n.user_id])).rows[0]?.display_name||'studente',c=s.courses.find(c=>c.courseId===context.courseId),values={nome_utente:name};
    if(context.itemId){const i=(await items(n.user_id)).find(i=>i.item_id===context.itemId);if(i?.kind==='goal'){values.obiettivo=i.data.title;if(i.data.deadline)values.giorni_obiettivo=core.dayNumber(i.data.deadline)-core.dayNumber(s.today);}if(i?.kind==='exam')values.giorni_esame=core.examDays(i.data,clock(),p.timeZone);}
-   if(c){values.nome_materia=c.subject;if(s.fresh){values.percentuale_completamento=Math.round(c.coverage);values.domande_da_ripassare=c.review.length;}}
+   if(c){values.nome_materia=c.subject;if(s.fresh){values.percentuale_completamento=Math.round(c.coverage);values.domande_da_ripassare=reviewCount(c);}}
    if(s.fresh&&s.lastStudyAt)values.giorni_inattivita=core.dayNumber(s.today)-core.dayNumber(core.localParts(new Date(s.lastStudyAt),p.timeZone).day);
    if(context.badge)values.traguardo=(await db.query('select label from public.quizlab_study_badges where user_id=$1 and badge_key=$2',[n.user_id,context.badge])).rows[0]?.label;
    try{n.title=template(a.title,values);n.message=template(a.message,values);}catch{return false;}
@@ -228,17 +262,26 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
   }
   return true;
  }
- async function dispatch(n){
-  const stored=(await db.query('select state,delivery_cancelled from public.quizlab_notifications where notification_id=$1',[n.notification_id])).rows[0];if(!stored||stored.delivery_cancelled||!['queued','ready'].includes(stored.state))return;
-  const p=(await prefs(n.user_id)).settings,s=await snapshot(n.user_id);
+ async function dispatch(n,{revalidate=false}={}){
+  const postpone=async ms=>db.query('update public.quizlab_notifications set next_check_at=$2 where notification_id=$1',[n.notification_id,new Date(clock().getTime()+ms)]);
+  const stored=(await db.query('select state,delivery_cancelled,read_at,archived_at from public.quizlab_notifications where notification_id=$1',[n.notification_id])).rows[0];if(!stored||stored.delivery_cancelled||!['queued','ready'].includes(stored.state))return;
+  const p=(await prefs(n.user_id)).settings;
+  if(stored.state==='ready'&&!revalidate){
+   if(stored.read_at||stored.archived_at||!p.pushEnabled||!p.categories[n.category]){await postpone(86400000);return;}
+   if(!core.deliveryWindow(p,clock(),{automatic:n.automatic,urgent:n.essential})){await postpone(900000);return;}
+   const pending=(await db.query("select exists(select 1 from public.quizlab_notification_devices d left join public.quizlab_notification_deliveries l on l.notification_id=$2 and l.device_id=d.device_id where d.user_id=$1 and d.enabled and d.permission='granted' and d.subscription is not null and ($3::text is null or d.device_id=$3) and (l.notification_id is null or l.status='retry' and l.attempts<3)) as pending",[n.user_id,n.notification_id,n.context.testDevice||null])).rows[0].pending;
+   if(!pending){await postpone(86400000);return;}
+  }
+  if(n.context.badge&&!(await db.query("select 1 from public.quizlab_study_badges where user_id=$1 and badge_key=$2 and evidence->>'verified'='true'",[n.user_id,n.context.badge])).rows.length){await postpone(86400000);return;}
+  const s=await snapshot(n.user_id);
   const pertinence=await pertinent(n,s,p);
-  if(pertinence===null){await db.query('update public.quizlab_notifications set next_check_at=$2 where notification_id=$1',[n.notification_id,new Date(clock().getTime()+60000)]);return;}
+  if(pertinence===null){await db.query('update public.quizlab_notifications set next_check_at=$2 where notification_id=$1',[n.notification_id,new Date(clock().getTime()+900000)]);return;}
   if(!pertinence){await db.query("update public.quizlab_notifications set state='cancelled' where notification_id=$1",[n.notification_id]);return;}
-  if(!await refreshMessage(n,s,p)){await db.query('update public.quizlab_notifications set next_check_at=$2 where notification_id=$1',[n.notification_id,new Date(clock().getTime()+60000)]);return;}
+  if(!await refreshMessage(n,s,p)){await db.query('update public.quizlab_notifications set next_check_at=$2 where notification_id=$1',[n.notification_id,new Date(clock().getTime()+900000)]);return;}
   await db.query('update public.quizlab_notifications set title=$2,message=$3,context=$4::jsonb,priority=$5 where notification_id=$1',[n.notification_id,n.title,n.message,JSON.stringify(n.context),n.priority]);
   await db.query("update public.quizlab_notifications set state='ready' where notification_id=$1 and state='queued'",[n.notification_id]);
   await db.query('update public.quizlab_notifications set next_check_at=$2 where notification_id=$1',[n.notification_id,new Date(clock().getTime()+60000)]);
-  if(!p.pushEnabled||!p.categories[n.category]||s.active&&!n.context.test||!core.deliveryWindow(p,clock(),{automatic:n.automatic,urgent:n.essential}))return;
+  if(!p.pushEnabled||!p.categories[n.category]){await postpone(86400000);return;}if(s.active&&!n.context.test){await postpone(90000);return;}if(!core.deliveryWindow(p,clock(),{automatic:n.automatic,urgent:n.essential})){await postpone(900000);return;}
   if(n.automatic&&!n.essential){const used=(await db.query("select n.notification_id,n.context,min(d.accepted_at) as first_sent from public.quizlab_notifications n join public.quizlab_notification_deliveries d using(notification_id) where n.user_id=$1 and n.automatic and not n.essential and d.accepted_at>=$2 and d.status in ('accepted','received','clicked') group by n.notification_id,n.context",[n.user_id,new Date(clock().getTime()-31*86400000)])).rows.filter(r=>r.notification_id!==n.notification_id);
    const day=core.localParts(clock(),p.timeZone).day;let todayCount=0;for(const row of used){const when=row.first_sent;if(when&&core.localParts(new Date(when),p.timeZone).day===day)todayCount++;}
    const sameToday=used.filter(r=>r.context.automation===n.context.automation&&r.first_sent&&core.localParts(new Date(r.first_sent),p.timeZone).day===day).length;
@@ -270,9 +313,11 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
    }
   }
  }
+ async function unreadCount(user,studyAllowed){if(typeof studyAllowed!=='boolean')studyAllowed=(await access(user)).study;
+  const unread=(await db.query("select count(*)::integer as count from public.quizlab_notifications where user_id=$1 and state='ready' and due_at<=$2 and (context->>'automation' is distinct from 'badge' or exists(select 1 from public.quizlab_study_badges sb where sb.user_id=$1 and sb.badge_key=quizlab_notifications.context->>'badge' and sb.evidence->>'verified'='true')) and read_at is null and archived_at is null and ($3 or category='service')",[user,clock(),studyAllowed])).rows[0].count;return{unread};}
  async function inbox(user,{offset=0,archived=false}={}){offset=num(Number(offset),0,1000000);if(!Number.isInteger(offset))throw fail(400,'Pagina non valida');const studyAllowed=(await access(user)).study;
   const rows=(await db.query("select notification_id,category,title,message,destination,essential,created_at,read_at,archived_at from public.quizlab_notifications where user_id=$1 and state='ready' and due_at<=$2 and (context->>'automation' is distinct from 'badge' or exists(select 1 from public.quizlab_study_badges sb where sb.user_id=$1 and sb.badge_key=quizlab_notifications.context->>'badge' and sb.evidence->>'verified'='true')) and (archived_at is not null)=$3 and ($5 or category='service') order by created_at desc limit 25 offset $4",[user,clock(),archived,offset,studyAllowed])).rows;
-  const unread=(await db.query("select count(*)::integer as count from public.quizlab_notifications where user_id=$1 and state='ready' and due_at<=$2 and (context->>'automation' is distinct from 'badge' or exists(select 1 from public.quizlab_study_badges sb where sb.user_id=$1 and sb.badge_key=quizlab_notifications.context->>'badge' and sb.evidence->>'verified'='true')) and read_at is null and archived_at is null and ($3 or category='service')",[user,clock(),studyAllowed])).rows[0].count;return{rows,unread};}
+  const {unread}=await unreadCount(user,studyAllowed);return{rows,unread};}
  async function mark(user,input){if(!['read','unread','archive','restore','allRead'].includes(input.action))throw fail(400,'Azione non valida');if(input.action==='allRead'){await db.query("update public.quizlab_notifications set read_at=$2 where user_id=$1 and state='ready' and due_at<=$2 and read_at is null",[user,clock()]);}else{uuid(input.notification_id);const field=['archive','restore'].includes(input.action)?'archived_at':'read_at',value=['read','archive'].includes(input.action)?clock():null;await db.query('update public.quizlab_notifications set '+field+'=$3 where user_id=$1 and notification_id=$2 and state=\'ready\'',[user,input.notification_id,value]);}return{ok:true};}
  async function receipt(user,input){uuid(input.notification_id);if(!['received','clicked','session','review'].includes(input.event))throw fail(400,'Interazione non valida');const device=text(input.device_id,120),column=input.event==='clicked'?'clicked_at':'received_at';const r=await db.query("update public.quizlab_notification_deliveries set "+column+"=coalesce("+column+",$4),status=case when $5='clicked' then 'clicked' when status='clicked' then status else 'received' end where user_id=$1 and notification_id=$2 and device_id=$3 and status in ('accepted','received','clicked','sending') returning notification_id",[user,input.notification_id,device,clock(),input.event]);if(r.rows.length&&['session','review'].includes(input.event)){
   await db.query('insert into public.quizlab_notification_audit(actor_id,action,detail)values($1,$2,$3::jsonb) on conflict do nothing',[user,'notification_'+input.event,JSON.stringify({notification_id:input.notification_id,device_id:device})]);
@@ -309,7 +354,7 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
   const outcome=delivery?.status||(!allowRealPush&&!sendPush?'disabled':!core.deliveryWindow(current,clock(),{automatic:false})?'quiet_hours':'not_sent');
   return{notification_id:id,realPushEnabled:allowRealPush,quietHoursRespected:true,outcome,failure:delivery?.failure||null,providerStatus:delivery?.provider_status||null};
  }
- async function dashboard(user){await requireStudy(user);const p=await prefs(user),s=await snapshot(user),list=await items(user);return{preferences:p,courses:s.courses.map(c=>({courseId:c.courseId,subject:c.subject,total:c.total,unique:c.unique,attemptCount:c.attemptCount,correct:c.correct,coverage:c.coverage,pending:c.pending.length,avg5:c.avg5,reviewCount:c.review.length,review:c.review.slice(0,500)})),goals:list.filter(i=>i.kind==='goal').map(i=>({...i,progress:core.goalValue(i.data,s,clock(),p.settings.timeZone)})),exams:list.filter(i=>i.kind==='exam').map(i=>({...i,days:core.examDays(i.data,clock(),p.settings.timeZone)})),badges:(await db.query('select badge_key,label,awarded_at from public.quizlab_study_badges where user_id=$1 and evidence->>\'verified\'=\'true\' order by awarded_at desc',[user])).rows,streak:s.streak,lastStudyAt:s.lastStudyAt,consolidatedAt:s.consolidatedAt,fresh:s.fresh};}
+ async function dashboard(user){await requireStudy(user);const p=await prefs(user),s=await snapshot(user,{details:true,interactive:true}),list=await items(user);return{preferences:p,courses:s.courses.map(c=>({courseId:c.courseId,subject:c.subject,total:c.total,unique:c.unique,attemptCount:c.attemptCount,correct:c.correct,coverage:c.coverage,pending:pendingCount(c),avg5:c.avg5,reviewCount:reviewCount(c),review:c.review.slice(0,500)})),goals:list.filter(i=>i.kind==='goal').map(i=>({...i,progress:goalValue(i.data,s,clock(),p.settings.timeZone)})),exams:list.filter(i=>i.kind==='exam').map(i=>({...i,days:core.examDays(i.data,clock(),p.settings.timeZone)})),badges:(await db.query('select badge_key,label,awarded_at from public.quizlab_study_badges where user_id=$1 and evidence->>\'verified\'=\'true\' order by awarded_at desc',[user])).rows,streak:s.streak,lastStudyAt:s.lastStudyAt,consolidatedAt:s.consolidatedAt,fresh:s.fresh};}
  async function campaignData(raw){
   const d={title:validateTemplate(text(raw.title,120)),message:validateTemplate(text(raw.message,1000)),category:raw.category,destination:destination(raw.destination||'./?study=inbox'),essential:!!raw.essential,filters:raw.filters||{},icon:'./icons/quizlab-sgiungla-192.png',scheduledAt:raw.scheduledAt||null,expiresAt:raw.expiresAt||new Date(clock().getTime()+7*86400000).toISOString(),references:{}};
   const refs=raw.references||{};
@@ -350,7 +395,7 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
    if(d.filters.minCoverage!==undefined&&coverage<Number(d.filters.minCoverage)||d.filters.maxCoverage!==undefined&&coverage>Number(d.filters.maxCoverage)){exclude('coverage_filter','La copertura non corrisponde al filtro.');continue;}
    if(d.filters.planId&&!(await db.query("select 1 from public.quizlab_user_access a join public.quizlab_contracts c on c.contract_id=a.current_contract_id where a.user_id=$1 and c.plan_snapshot->>'plan_id'=$2",[u.id,d.filters.planId])).rows.length){exclude('plan_filter','Il piano dell’account non corrisponde al filtro.');continue;}
    const badges=campaignVariables(d.title,d.message).includes('traguardo')?(await db.query('select badge_key,label from public.quizlab_study_badges where user_id=$1 and evidence->>\'verified\'=\'true\' order by awarded_at desc,badge_key',[u.id])).rows:[];
-   const resolved=resolveCampaignTemplate({data:d,user:u,snapshot:s,preferences:p.settings,items:all,badges,now:clock()});
+   const resolved=resolveCampaignTemplate({data:d,user:u,snapshot:s,preferences:p.settings,items:all,badges,now:clock(),goalCalculator:goalValue});
    if(resolved.issues.length){excluded.push({id:u.id,email:u.email,issues:resolved.issues});continue;}
    eligible.push({id:u.id,email:u.email,title:resolved.title,message:resolved.message,values:resolved.values,resolvedReferences:resolved.context,preferenceRevision:p.revision,studyAllowed:a.study});
   }return{eligible,excluded};
@@ -385,11 +430,11 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
   try{ 
   // A crash may leave a claim without a provider result. Preserve uncertainty instead of retrying blindly.
   await db.query("update public.quizlab_notification_deliveries set status='unknown',failure='Invio interrotto; esito incerto, nessun reinvio automatico' where status='sending' and attempt_started_at<$1",[new Date(clock().getTime()-120000)]);
-  await campaignsDue(started+60000);const users=(await db.query('select id from auth.users order by id limit 25 offset $1',[cursor])).rows;let processed=0;
-  for(const u of users){if(Date.now()-started>70000)break;try{await generate(u.id);}catch(e){await audit(null,'generation_failed',{userId:u.id,message:e.message});}processed++;}
+  await campaignsDue(started+60000);const users=(await db.query('select id from auth.users order by id limit 25 offset $1',[cursor])).rows;let processed=0;const changedUsers=new Set();
+  for(const u of users){if(Date.now()-started>70000)break;try{if(await generate(u.id))changedUsers.add(u.id);}catch(e){await audit(null,'generation_failed',{userId:u.id,message:e.message});}processed++;}
   cursor=processed<users.length?cursor+processed:users.length===25?cursor+25:0;
-  const due=(await db.query("select * from public.quizlab_notifications where state in ('queued','ready') and not delivery_cancelled and due_at<=$1 and expires_at>$1 and (state='queued' or next_check_at<=$1) order by (state='queued') desc,next_check_at,priority desc,due_at limit 100",[clock()])).rows;
-  for(const n of due){if(Date.now()-started>80000)break;const held=(await db.query("update quizlab_release_private.suite_scheduler set lease_until=now()+interval '110 seconds' where singleton and owner=$1 returning owner",[owner])).rows.length;if(!held)break;try{await dispatch(n);}catch(e){await audit(null,'dispatch_failed',{id:n.notification_id,message:e.message});}}
+  const due=(await db.query("select * from public.quizlab_notifications where state in ('queued','ready') and not delivery_cancelled and due_at<=$1 and expires_at>$1 and next_check_at<=$1 order by (state='queued') desc,next_check_at,priority desc,due_at limit 100",[clock()])).rows;
+  for(const n of due){if(Date.now()-started>80000)break;const held=(await db.query("update quizlab_release_private.suite_scheduler set lease_until=now()+interval '110 seconds' where singleton and owner=$1 returning owner",[owner])).rows.length;if(!held)break;try{await dispatch(n,{revalidate:changedUsers.has(n.user_id)});}catch(e){await audit(null,'dispatch_failed',{id:n.notification_id,message:e.message});}}
   await db.query("update public.quizlab_notifications set state='expired' where state='queued' and expires_at<=$1",[clock()]);return{users:users.length,notifications:due.length};
   }finally{await db.query('update quizlab_release_private.suite_scheduler set cursor=$2,lease_until=null,owner=null,last_run=now() where singleton and owner=$1',[owner,cursor]);}
  })().finally(()=>{tickPromise=null;});return tickPromise;}
@@ -411,7 +456,7 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
   (select count(*) from public.quizlab_notification_audit where action='preferences' and detail->'before'->>'pushEnabled'='true' and detail->'after'->>'pushEnabled'='false') as push_deactivations`)).rows[0];
   totals.achieved_current_period=0;totals.study_resume_after_inactivity=0;
   for(const u of await directoryUsers()){if(!(await access(u.id)).study)continue;const p=(await prefs(u.id)).settings,s=await snapshot(u.id);
-   totals.achieved_current_period+=(await items(u.id,'goal')).filter(i=>core.goalValue(i.data,s,clock(),p.timeZone).status==='achieved').length;
+   totals.achieved_current_period+=(await items(u.id,'goal')).filter(i=>goalValue(i.data,s,clock(),p.timeZone).status==='achieved').length;
    if(s.lastStudyAt)totals.study_resume_after_inactivity+=Number((await db.query("select count(distinct n.notification_id) as n from public.quizlab_notifications n join public.quizlab_notification_deliveries d using(notification_id) where n.user_id=$1 and n.context->>'automation'='inactivity' and d.clicked_at is not null and d.clicked_at<$2 and d.clicked_at>$3",[u.id,s.lastStudyAt,new Date(Date.parse(s.lastStudyAt)-7*86400000)])).rows[0].n);
   }
   return{totals,automations:await automationRows(),campaigns:(await db.query('select * from public.quizlab_notification_campaigns order by updated_at desc limit 25 offset $1',[offset])).rows,
@@ -420,14 +465,14 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
    users:await directoryUsers(),realPushEnabled:allowRealPush,scope:'Account UniSgiunglaLab autorizzati',measurement:'Conferme del provider e segnali dei client sono distinti. Obiettivi: periodo attuale nei dati consolidati. Ripresa dopo inattività: studio entro 7 giorni da un clic, associazione temporale senza attribuzione causale.'};
  }
  async function summary(user){
-  const preference=await prefs(user),notifications=await inbox(user),a=await access(user);let overview=null;
-  if(a.study){const s=await snapshot(user),all=await items(user),goals=all.filter(i=>i.kind==='goal').map(i=>({title:i.data.title,...core.goalValue(i.data,s,clock(),preference.settings.timeZone)}));
+  const preference=await prefs(user),a=await access(user),notifications=await unreadCount(user,a.study);let overview=null;
+  if(a.study){const s=await snapshot(user),all=await items(user),goals=all.filter(i=>i.kind==='goal').map(i=>({title:i.data.title,...goalValue(i.data,s,clock(),preference.settings.timeZone)}));
    const exams=all.filter(i=>i.kind==='exam'&&!i.data.cancelled&&core.examDays(i.data,clock(),preference.settings.timeZone)>=0).sort((x,y)=>x.data.date.localeCompare(y.data.date)||String(x.data.time||'').localeCompare(String(y.data.time||'')));
    const e=exams[0],c=e?s.courses.find(c=>c.courseId===e.data.courseId):null;
    overview={streak:s.streak,activeGoals:goals.filter(g=>g.status==='active').length,achievedGoals:goals.filter(g=>g.status==='achieved').length,consolidatedAt:s.consolidatedAt,
     nextExam:e&&c?{...e.data,subject:c.subject,days:core.examDays(e.data,clock(),preference.settings.timeZone),coverage:c.coverage}:null};
   }return{preferences:preference,unread:notifications.unread,overview};
  }
- return{prefs,savePreferences,snapshot,saveItem,registerDevice,heartbeat,listDevices,revokeDevice,dashboard,inbox,mark,receipt,saveDiagnostics,testPush,automationRows,saveAutomation,campaignOptions,preview,saveCampaign,report,summary,tick,generate,dispatch,enqueue,
+ return{prefs,savePreferences,snapshot,saveItem,registerDevice,heartbeat,listDevices,revokeDevice,dashboard,inbox,unread:unreadCount,mark,receipt,saveDiagnostics,testPush,automationRows,saveAutomation,campaignOptions,preview,saveCampaign,report,summary,tick,generate,dispatch,enqueue,
   tickPending:()=>tickPromise||Promise.resolve(),publicConfig:()=>({publicKey:vapid.publicKey,realPushEnabled:allowRealPush,testOnly:false})};
 }

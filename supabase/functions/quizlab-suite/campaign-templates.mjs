@@ -4,7 +4,7 @@ const core=globalThis.QuizLabStudyCore;
 
 // Resolve only recorded, account-owned data. Do not fabricate a missing value
 // or silently select an arbitrary goal/exam/badge among several candidates.
-export function resolveCampaignTemplate({data,user,snapshot:s,preferences:p,items=[],badges=[],now}){
+export function resolveCampaignTemplate({data,user,snapshot:s,preferences:p,items=[],badges=[],now,goalCalculator=core.goalValue}){
  const used=campaignVariables(data.title,data.message),needs=k=>used.includes(k),refs=data.references?.[user.id]||{};
  const values={nome_utente:user.display_name||'studente'},issues=[],context={};
  const today=core.localParts(now,p.timeZone).day;
@@ -20,14 +20,14 @@ export function resolveCampaignTemplate({data,user,snapshot:s,preferences:p,item
  if(needs('obiettivo')||needs('giorni_obiettivo')){
   const vars=used.filter(k=>['obiettivo','giorni_obiettivo'].includes(k));
   let candidates=items.filter(i=>i.kind==='goal'&&relevant(i));
-  if(needs('giorni_obiettivo')&&!refs.goalId&&candidates.length>1)candidates=candidates.filter(i=>i.data.deadline&&!['paused','expired','achieved'].includes(core.goalValue(i.data,s,now,p.timeZone).status));
+  if(needs('giorni_obiettivo')&&!refs.goalId&&candidates.length>1)candidates=candidates.filter(i=>i.data.deadline&&!['paused','expired','achieved'].includes(goalCalculator(i.data,s,now,p.timeZone).status));
   goal=pick(candidates,'item_id',refs.goalId,vars,'Obiettivo');
   if(goal){
    context.goalId=goal.item_id;context.goalRevision=Number(goal.revision);
    values.obiettivo=goal.data.title;
    if(goal.data.courseId&&!s.courses.some(c=>c.courseId===goal.data.courseId))issue(vars,'course_unavailable','La materia dell’obiettivo non è disponibile nel destinatario.');
    if(needs('giorni_obiettivo')){
-    const status=core.goalValue(goal.data,s,now,p.timeZone).status;
+    const status=goalCalculator(goal.data,s,now,p.timeZone).status;
     if(!goal.data.deadline)issue(['giorni_obiettivo'],'deadline_missing','L’obiettivo selezionato non ha una scadenza. Impostala nell’account dello studente.');
     else if(['paused','expired','achieved'].includes(status))issue(['giorni_obiettivo'],'goal_not_pending','Il countdown non è pertinente: l’obiettivo è sospeso, trascorso o già raggiunto.');
     else values.giorni_obiettivo=core.dayNumber(goal.data.deadline)-core.dayNumber(today);
@@ -58,7 +58,7 @@ export function resolveCampaignTemplate({data,user,snapshot:s,preferences:p,item
    const courses=c?[c]:s.courses,total=courses.reduce((n,c)=>n+c.total,0),unique=courses.reduce((n,c)=>n+c.unique,0);
    const bankVars=quantitative.filter(k=>k!=='giorni_inattivita');
    if(bankVars.length&&!total)issue(bankVars,'bank_missing','Non ci sono domande nella banca di riferimento. Importa o assegna una materia con domande.');
-   else if(bankVars.length){values.domande_rimanenti=total-unique;values.domande_da_ripassare=courses.reduce((n,c)=>n+c.review.length,0);values.percentuale_completamento=Math.round(unique/total*100);}
+   else if(bankVars.length){values.domande_rimanenti=total-unique;values.domande_da_ripassare=courses.reduce((n,c)=>n+(c.reviewCount??c.review.length),0);values.percentuale_completamento=Math.round(unique/total*100);}
    if(needs('giorni_inattivita')){
     if(!s.lastStudyAt)issue(['giorni_inattivita'],'study_activity_missing','Non risulta ancora un’attività significativa di studio. L’accesso all’app non conta come esercizio.');
     else values.giorni_inattivita=core.dayNumber(today)-core.dayNumber(core.localParts(new Date(s.lastStudyAt),p.timeZone).day);
