@@ -1,4 +1,4 @@
-const CACHE='quizlab-v0.11.27';
+const CACHE='quizlab-v0.11.27-r2';
 const ROOT=new URL('./',self.location.href);
 const INDEX=new URL('./index.html',ROOT).href;
 const MANIFEST=new URL('./asset-manifest.json',ROOT).href;
@@ -11,7 +11,8 @@ const assetUrls=async()=>{
  const data=await manifest.json();assets=new Set(data.assets.map(x=>new URL(x,ROOT).href));assets.add(MANIFEST);return assets;
 };
 self.addEventListener('install',event=>event.waitUntil((async()=>{
- const response=await fetch(MANIFEST,{cache:'no-store'});if(!response.ok)throw Error('Release manifest unavailable');
+ const manifestRequest=new URL(MANIFEST);manifestRequest.searchParams.set('build',CACHE+'-'+Date.now());
+ const response=await fetch(manifestRequest,{cache:'no-store'});if(!response.ok)throw Error('Release manifest unavailable');
  const data=await response.clone().json();if(data.version!=='0.11.27'||!Array.isArray(data.assets)||!data.sha256)throw Error('Incoherent release');
  const urls=data.assets.map(x=>new URL(x,ROOT));if(urls.some(u=>u.origin!==ROOT.origin||!u.href.startsWith(ROOT.href)))throw Error('Invalid asset path');
  const validated=[];
@@ -21,8 +22,21 @@ self.addEventListener('install',event=>event.waitUntil((async()=>{
   const batch=await Promise.all(urls.slice(offset,offset+6).map(async u=>{
    const relative='./'+u.pathname.slice(ROOT.pathname.length),key=relative==='./'?'./index.html':relative;
    const expected=data.sha256[key];if(!/^[a-f0-9]{64}$/.test(expected||''))throw Error('Missing asset digest');
-   const asset=await fetch(new Request(u.href,{cache:'reload'}));if(!asset.ok||asset.type==='opaque')throw Error('Asset unavailable');
-   const body=await asset.clone().arrayBuffer(),actual=hex(await crypto.subtle.digest('SHA-256',body));
+   let asset,body;
+   if(key.endsWith('.html')){
+    // Some HTTPS intermediaries inject scripts or transcode HTML responses.
+    // Build the shell from the release's JSON payload, retaining the same
+    // mandatory digest. Never strip scripts or accept altered HTML bytes.
+    const encoded=data.html?.[key];
+    if(typeof encoded!=='string'||encoded.length>1400000||!/^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded))throw Error('Missing HTML release payload');
+    body=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));
+    asset=new Response(body,{status:200,headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}});
+   }else{
+    const versioned=new URL(u.href);versioned.searchParams.set('sha256',expected);
+    asset=await fetch(new Request(versioned.href,{cache:'reload'}));if(!asset.ok||asset.type==='opaque')throw Error('Asset unavailable');
+    body=await asset.clone().arrayBuffer();
+   }
+   const actual=hex(await crypto.subtle.digest('SHA-256',body));
    if(actual!==expected)throw Error('Asset digest mismatch');
    return [u.href,asset];
   }));validated.push(...batch);
