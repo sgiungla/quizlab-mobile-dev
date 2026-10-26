@@ -1,0 +1,5 @@
+create index quizlab_notification_campaign_actor on public.quizlab_notification_campaigns(actor_id);
+create index quizlab_notification_delivery_user on public.quizlab_notification_deliveries(user_id);
+create index quizlab_shop_event_order on public.quizlab_shop_events(order_id);
+create index quizlab_shop_order_contract on public.quizlab_shop_orders(contract_id);
+create index quizlab_shop_product_source on public.quizlab_shop_products(source_bank_id);
