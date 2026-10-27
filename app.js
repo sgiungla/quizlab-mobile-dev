@@ -36,12 +36,12 @@ let workspaceGeneration=0;
 let syncRunId=0;
 let localCourseSaveSerial=0;
 let searchLimit=30;
-let studyTelemetryAt=0,studyTelemetryClean=null;
+let studyTelemetryAt=0,studyTelemetryClean=null,studyTelemetryActive=null;
 let studyOverview=null,studyBackgroundBusy=false,studyOverviewUser=null;
 async function studyRequest(path,body){
  const userId=cloudState.user?.id;if(!userId||!sync.client)throw new Error('Accedi al tuo account UniSgiunglaLab');
  const result=await sync.client.auth.getSession(),token=result.data?.session?.access_token;
- if(!token)throw new Error('Verifica online necessaria per questa operazione');
+ if(!token)throw new Error('Verifica online necessaria per questa operazione');if(userId!==cloudState.user?.id||result.data?.session?.user?.id&&result.data.session.user.id!==userId)throw new Error('Account cambiato');
  const config=globalThis.QUIZLAB_LAB_CONFIG;
  if(config?.mode!=='production'||!config.suiteBase)throw new Error('Modulo studio non configurato');
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
@@ -49,11 +49,11 @@ async function studyRequest(path,body){
   if(userId!==cloudState.user?.id)throw new Error('Account cambiato');if(!response.ok)throw Object.assign(new Error(value.message||'Operazione non riuscita'),{status:response.status});return value;
  }finally{clearTimeout(timer);}
 }
-async function studyHeartbeat(){
+async function studyHeartbeat({force=false}={}){
  if(globalThis.QUIZLAB_LAB_CONFIG?.studyEnabled===false)return;
  if(!cloudState.user||!navigator.onLine)return;const clean=!(store.sync?.dirtyCourseIds?.length||store.sync?.dirtyBankCourseIds?.length);
- if(studyTelemetryClean===clean&&Date.now()-studyTelemetryAt<45000)return;studyTelemetryClean=clean;studyTelemetryAt=Date.now();
- try{await studyRequest('heartbeat',{device_id:store.sync.clientId,clean,active:document.visibilityState==='visible'});}catch{}
+ const active=document.visibilityState==='visible'&&document.hasFocus?.()!==false;if(!force&&studyTelemetryClean===clean&&studyTelemetryActive===active&&Date.now()-studyTelemetryAt<45000)return;studyTelemetryClean=clean;studyTelemetryActive=active;studyTelemetryAt=Date.now();
+ try{await globalThis.QuizLabStudyUI.queueActivity(body=>studyRequest('heartbeat',body),{device_id:store.sync.clientId,expected_user_id:cloudState.user.id,clean,active,client_info:globalThis.QuizLabStudyUI.clientInfo('pwa')});}catch{studyTelemetryAt=0;}
 }
 async function refreshStudyBell(){
  if(globalThis.QUIZLAB_LAB_CONFIG?.studyEnabled===false)return;
@@ -83,6 +83,8 @@ function studySummaryHtml(){
 globalThis.addEventListener?.('quizlab-study-refresh',()=>studyRefreshBackground());
 if('serviceWorker'in navigator)navigator.serviceWorker.addEventListener?.('message',event=>{if(event.data?.type==='QUIZLAB_PUSH_EVIDENCE')studyRefreshBackground().catch(()=>{});});
 setInterval(()=>{if(document.visibilityState==='visible'&&cloudState.user)studyRefreshBackground().catch(()=>{});},60000);
+document.addEventListener('visibilitychange',()=>studyHeartbeat({force:true}).catch(()=>{}));
+window.addEventListener('blur',()=>studyHeartbeat({force:true}).catch(()=>{}));
 async function openStudyFromLocation(){
  const params=new URLSearchParams(location.search),tab=params.get('study'),notification=params.get('notification'),device=params.get('pushDevice');
  if(!tab||!cloudState.user)return;
@@ -1437,7 +1439,7 @@ function render(){
 app.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b)return;const a=b.dataset.action;
  if((session?.finishing||session?.answers?.[current()?.id]?.saving)&&['answer','confirm','exam-prev','exam-next','mark','next','study-prev','study-next'].includes(a))return;
  if(a==='study-panel'){try{await openStudyPanel(b.dataset.studyTab||'goals');}catch(error){toast(error.message);}return;}
- if(a==='sign-out'){globalThis.QuizLabStudyUI?.close();navigator.serviceWorker?.controller?.postMessage({type:'QUIZLAB_PUSH_POLICY',userId:null});try{await studyRequest('revoke-device',{device_id:store.sync.clientId});}catch{}}
+ if(a==='sign-out'){const logoutUser=cloudState.user?.id,logoutDevice=store.sync.clientId;globalThis.QuizLabStudyUI?.close();navigator.serviceWorker?.controller?.postMessage({type:'QUIZLAB_PUSH_POLICY',userId:null});try{const reg=await navigator.serviceWorker?.getRegistration();if(cloudState.user?.id===logoutUser)await(await reg?.pushManager?.getSubscription())?.unsubscribe();}catch{}try{if(cloudState.user?.id===logoutUser)await studyRequest('revoke-device',{device_id:logoutDevice,expected_user_id:logoutUser});}catch{}}
  const authActions=['sign-in','sign-up','sign-out','refresh-access','license-refresh','cloud','home','toggle-theme'];
  const accountActions=[...authActions,'profile','save-profile','push-profile','avatar-pick','force-app-update'];
  if(!baseAccessAllowed()&&!authActions.includes(a)){licensePage();return;}

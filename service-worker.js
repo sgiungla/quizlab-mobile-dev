@@ -23,15 +23,23 @@
  }
  const dayNumber=d=>Date.parse(d+'T00:00:00Z')/dayMs;
  const minutes=t=>Number(t.slice(0,2))*60+Number(t.slice(3));
- function deliveryWindow(p,now,{automatic=true,urgent=false}={}){
+ function deliveryWindow(p,now,{automatic=true,urgent=false,immediate=false}={}){
   const x=localParts(now,p.timeZone),a=minutes(p.quietStart),b=minutes(p.quietEnd);
   if(a!==b&&(a<b?x.minute>=a&&x.minute<b:x.minute>=a||x.minute<b))return false;
-  if(automatic&&!urgent&&(!p.studyDays.includes(x.weekday)||x.minute<minutes(p.reminderTime)))return false;
+  if(automatic&&!urgent&&(!p.studyDays.includes(x.weekday)||!immediate&&x.minute<minutes(p.reminderTime)))return false;
   return true;
+ }
+ function inQuietHours(p,now){const x=localParts(now,p.timeZone),a=minutes(p.quietStart),b=minutes(p.quietEnd);return a!==b&&(a<b?x.minute>=a&&x.minute<b:x.minute>=a||x.minute<b);}
+ function nextDeliveryAt(p,now,options={}){
+  if(deliveryWindow(p,now,options))return new Date(now);
+  if(options.automatic!==false&&!options.urgent&&!p.studyDays.length)return null;
+  const start=Math.floor(now.getTime()/60000)*60000;
+  for(let minute=1;minute<=8*24*60;minute++){const at=new Date(start+minute*60000);if(deliveryWindow(p,at,options))return at;}
+  return null;
  }
  const validDate=v=>!!v&&Number.isFinite(Date.parse(v));
  function summarize(rows,now=new Date(),zone='Europe/Rome'){
-  const today=localParts(now,zone).day,courses=[],studyDates=new Set();let lastStudyAt=null;
+  const today=localParts(now,zone).day,courses=[],studyDates=new Set();let lastStudyAt=null,nextReviewAt=null;
   for(const row of rows){
    const bank=row.bank_json||{},progress=row.progress_json||{},meta=progress.syncMeta||{},reset=meta.performanceResetAt;
    const questions=[...(bank.officialBank||[]),...(bank.aiBank||[])],ids=new Set(questions.map(q=>String(q.id))),officialIds=new Set((bank.officialBank||[]).map(q=>String(q.id))),events=new Map();
@@ -52,6 +60,7 @@
     // is additive: 1/3/7/14/30 days after consecutive correct responses.
     let successes=0;for(let i=hist.length-1;i>=0&&hist[i].correct;i--)successes++;
     const interval=[1,3,7,14,30][Math.min(4,Math.max(0,successes-1))],elapsed=last?(now-Date.parse(last.at))/dayMs:0;
+    const next=last?new Date(Date.parse(last.at)+interval*dayMs).toISOString():null;if(next&&Date.parse(next)>now&&(!nextReviewAt||next<nextReviewAt))nextReviewAt=next;
     return{questionId:q.id,unresolved,wrong,periodic:!!last&&!unresolved&&last.correct&&elapsed>=interval,priority:(unresolved?1000:0)+Math.min(wrong,20)*30+Math.min(30,Math.floor(elapsed)),nextReviewAt:last?new Date(Date.parse(last.at)+interval*dayMs).toISOString():null};
    }).filter(q=>q.unresolved||q.periodic).sort((a,b)=>b.priority-a.priority||String(a.questionId).localeCompare(String(b.questionId)));
    courses.push({courseId:row.course_id,subject:row.subject,total:ids.size,official:officialIds.size,unique:seen.size,officialUnique:[...seen].filter(id=>officialIds.has(id)).length,
@@ -59,10 +68,11 @@
     pending:[...new Set(pending)],review,recoveredAll:!pending.length&&[...histories.values()].some(h=>h.some(a=>!a.correct))&&[...histories.values()].every(h=>!h.some(a=>!a.correct)||h.at(-1)?.correct===true),coverage:ids.size?seen.size/ids.size*100:0});
   }
   let streak=0,day=dayNumber(today);if(!studyDates.has(today))day--;while(studyDates.has(new Date(day*dayMs).toISOString().slice(0,10))){streak++;day--;}
-  return {courses,lastStudyAt,streak,today,studyDates:[...studyDates].sort(),computedAt:now.toISOString()};
+  return {courses,lastStudyAt,nextReviewAt,streak,today,studyDates:[...studyDates].sort(),computedAt:now.toISOString()};
  }
  function periodBounds(goal,now,zone){
   const today=localParts(now,zone).day;let start=goal.startDate||today,end=goal.deadline||'9999-12-31',periodKey=goal.startDate||'all';
+  if(goal.metric==='recovery')return{start,end,periodKey:'recovery:'+start};
   if(goal.period==='daily'){start=today;end=today;periodKey=today;}
   if(goal.period==='weekly'){const weekday=(new Date(today+'T12:00Z').getUTCDay()+6)%7;start=new Date((dayNumber(today)-weekday)*dayMs).toISOString().slice(0,10);end=new Date((dayNumber(start)+6)*dayMs).toISOString().slice(0,10);periodKey=start;}
   return{start,end,periodKey};
@@ -90,11 +100,11 @@
    status:goal.paused?'paused':goal.startDate&&localParts(now,zone).day<goal.startDate?'scheduled':valid&&value>=target?'achieved':expired?'expired':'active',periodKey};
  }
  function examDays(exam,now,zone){return Math.round(dayNumber(exam.date)-dayNumber(localParts(now,zone).day));}
- const core={defaults,pushPresentation,localParts,deliveryWindow,summarize,goalValue,examDays,dayNumber};
+ const core={defaults,pushPresentation,localParts,deliveryWindow,inQuietHours,nextDeliveryAt,summarize,goalValue,examDays,dayNumber};
  root.QuizLabStudyCore=core;if(typeof module!=='undefined'&&module.exports)module.exports=core;
 })(typeof globalThis==='undefined'?this:globalThis);
 
-const CACHE='quizlab-v0.11.28-r6';
+const CACHE='quizlab-v0.11.28-r7';
 const ROOT=new URL('./',self.location.href);
 const INDEX=new URL('./index.html',ROOT).href;
 const MANIFEST=new URL('./asset-manifest.json',ROOT).href;

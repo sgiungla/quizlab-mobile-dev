@@ -51,7 +51,7 @@ async function handle(req:Request){
  const m={bytes:0};return metrics.run(m,async()=>{
  let status=200,data:any;
  try{
-  if(route==='health'){return Response.json({version:VERSION,mode:'production',noRealCharge:true,scheduler:'minute'}, {headers:cors(req)});}
+  if(route==='health'){return Response.json({version:VERSION,mode:'production',noRealCharge:true,scheduler:'minute',notificationPolicy:2}, {headers:cors(req)});}
   if(!['GET','POST'].includes(req.method))throw Object.assign(Error('Metodo non consentito'),{status:405});
   if(Number(req.headers.get('content-length')||0)>65536)throw Object.assign(Error('Richiesta troppo grande'),{status:413});
   const {study,commerce,settings}=await modules();
@@ -66,6 +66,7 @@ async function handle(req:Request){
    const raw=req.method==='POST'?await req.text():'';if(raw.length>65536)throw Object.assign(Error('Richiesta troppo grande'),{status:413});
    let input:any={};try{input=raw?JSON.parse(raw):{};}catch{throw Object.assign(Error('Richiesta non valida'),{status:400});}
    if(!input||Array.isArray(input)||typeof input!=='object')throw Object.assign(Error('Richiesta non valida'),{status:400});
+   if(input.expected_user_id&&input.expected_user_id!==id)throw Object.assign(Error('Account cambiato'),{status:403});
    const offset=Number(u.searchParams.get('offset')||0);if(!Number.isInteger(offset)||offset<0||offset>100000)throw Object.assign(Error('Pagina non valida'),{status:400});
    const get:Record<string,()=>any>={
     'study/preferences':()=>study.prefs(id),'study/dashboard':()=>study.dashboard(id),'study/devices':()=>study.listDevices(id),
