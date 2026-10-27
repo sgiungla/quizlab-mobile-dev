@@ -4,6 +4,7 @@ import {loadStore,saveStore,emptyStore,workspaceMigrationInfo,selectWorkspace,cu
 import {QuizLabSyncAdapter} from './sync-adapter.js';
 import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
 import './study-core.js';
+import './list-navigation.js';
 import './study-ui.js';
 import {syncPushEvidence} from './push-evidence.js';
 import {collectPushDiagnostics} from './push-diagnostics.js';
@@ -354,9 +355,11 @@ function home(){
   }
  }
  if(!rows.length)html+='<section class="card empty"><strong>Nessuna materia.</strong><p>Importa il JSON “banca COMPLETA” esportato dal desktop.</p></section>';
- for(const [id,c] of rows){const m=metrics(c);html+='<section class="card course-card"><div class="eyebrow">Materia</div><div class="subject-name">'+esc(c.subject||id)+'</div><div class="bank-total"><span>Domande in banca</span><strong>'+m.total+'</strong></div><div class="pill-row"><span class="pill off">'+m.official+' ufficiali</span><span class="pill ai">'+m.ai+' AI</span><span class="pill">'+m.attempted+' affrontate</span></div><div class="stats"><div class="stat"><span>Copertura</span><strong>'+pct(m.coverage)+'</strong></div><div class="stat"><span>Accuratezza</span><strong>'+pct(m.accuracy)+'</strong></div></div><div class="actions"><button class="btn" data-action="open" data-id="'+esc(id)+'">Apri materia →</button><button class="btn secondary" data-action="export" data-id="'+esc(id)+'">Esporta</button></div></section>';}
+ const courseCard=([id,c])=>{const m=metrics(c);return'<section class="card course-card"><div class="eyebrow">Materia</div><div class="subject-name">'+esc(c.subject||id)+'</div><div class="bank-total"><span>Domande in banca</span><strong>'+m.total+'</strong></div><div class="pill-row"><span class="pill off">'+m.official+' ufficiali</span><span class="pill ai">'+m.ai+' AI</span><span class="pill">'+m.attempted+' affrontate</span></div><div class="stats"><div class="stat"><span>Copertura</span><strong>'+pct(m.coverage)+'</strong></div><div class="stat"><span>Accuratezza</span><strong>'+pct(m.accuracy)+'</strong></div></div><div class="actions"><button class="btn" data-action="open" data-id="'+esc(id)+'">Apri materia →</button><button class="btn secondary" data-action="export" data-id="'+esc(id)+'">Esporta</button></div></section>';};
+ html+='<div data-home-courses></div>';
  html+=cloudNoticeHtml()+'<section class="card"><h3 class="section-title">Sincronizzazione</h3><p class="subtle">'+(cloudState.user?'Cloud collegato · sincronizzazione automatica attiva. I progressi restano disponibili anche offline entro la verifica di accesso.':'Puoi continuare a usare QuizLab in locale oppure accedere qui sopra per attivare la sincronizzazione cloud.')+'</p></section></div>';
  page(html);
+ globalThis.QuizLabListNavigation.mount(app.querySelector('[data-home-courses]'),{key:currentWorkspaceKey()+':home-courses',rows,renderItem:courseCard,text:([id,c])=>c.subject||id,label:'materie'});
 }
 
 function dashboard(){
