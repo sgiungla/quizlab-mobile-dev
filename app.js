@@ -152,7 +152,14 @@ async function recordCloudFailure(error,op){
  try{await saveStore(store);}catch(storageError){console.warn('Retry scheduling persistence',storageError);}
 }
 function clearCloudFailure(){if(store.sync)delete store.sync.cloudRetry;lastSyncError=false;}
-function cloudNoticeHtml(){
+function cloudNoticeHtml(){return '<div data-cloud-notice>'+cloudNoticeContentHtml()+'</div>';}
+function refreshCloudNotice(){
+ const content=cloudNoticeContentHtml();
+ for(const el of document.querySelectorAll('[data-cloud-notice]')){
+  if(el.innerHTML!==content)el.innerHTML=content;
+ }
+}
+function cloudNoticeContentHtml(){
  const recovery=store.sync?.storageRecovery;
  const localNotice=recovery?.incomplete?'<section class="card" role="status"><h3 class="section-title">Archivio locale da verificare</h3><p class="subtle">'+(recovery.reason==='indexeddb_unavailable'?'Sto usando la copia locale di riserva. I nuovi salvataggi riusciti restano su questo dispositivo; le copie saranno riunite quando l’archivio principale tornerà disponibile.':'Una copia locale non è leggibile. È mostrato l’archivio disponibile; la copia originale resta conservata e il recupero non è completo.')+'</p></section>':'';
  if(cloudState.user&&cloudRetryState().code==='SYNC_NOT_CONVERGED')return localNotice+'<section class="card"><h3 class="section-title">Sincronizzazione da verificare</h3><p class="subtle">Il cloud risponde, ma alcuni dati sono cambiati durante la sincronizzazione o non sono ancora confermati. I dati restano salvati su questo dispositivo.</p><p class="subtle">Ripeti «Sincronizza tutto» per verificare l’allineamento. I tentativi automatici restano distanziati.</p><div class="actions"><button class="btn secondary" data-action="sync-all">Sincronizza tutto</button></div></section>';
@@ -200,6 +207,7 @@ function themeToggleHtml(){
 applyTheme(currentTheme);
 
 function refreshSyncBadge(){
+ refreshCloudNotice();
  const el=document.querySelector('[data-sync-badge]');
  if(!el)return;
  const m=syncBadgeModel();
