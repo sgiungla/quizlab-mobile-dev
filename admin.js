@@ -1,5 +1,6 @@
 import {installAdminSuite} from './admin-suite.mjs';
 import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
+import {groupBankSources} from './admin-bank-sources.mjs';
 import {readUserCourses} from './db.js';
 import {createAdminUserListState,adminUserPageRequest,readAdminUserFilters,renderAdminUserList,renderAdminUserDetails,applyAdminUserPage,resetAdminUserFilters,updateAdminUserFilters,adminEffectiveStatus} from './admin-user-list.js';
 
@@ -304,7 +305,8 @@ async function refreshTarget(){
 }
 function showCandidates(rows){
  candidates=rows;sourceGeneration++;restorePreview=null;el('bankCandidate').replaceChildren(new Option('Seleziona la fonte delle domande',''));
- rows.forEach((row,index)=>el('bankCandidate').append(new Option(row.subject+' · '+bankCount(row.bank)+' domande · '+(row.provenance||'File JSON'),String(index))));
+ const groups=new Map();
+ rows.forEach((row,index)=>{const text=row.subject+' · '+bankCount(row.bank)+' domande · '+(row.provenance||'File JSON');if(row.sourceVariants>1){let group=groups.get(row.courseId);if(!group){group=document.createElement('optgroup');group.label=row.subject+' · copie differenti: scegli la fonte';groups.set(row.courseId,group);el('bankCandidate').append(group);}group.append(new Option((row.provenance||'File JSON')+' · '+bankCount(row.bank)+' domande',String(index)));}else el('bankCandidate').append(new Option(text,String(index)));});
  // Loading a bank never changes the destination or silently chooses a source.
  el('bankCandidate').value='';preview();
 }
@@ -357,7 +359,7 @@ async function loadMyBanks(token){
   try{const {data,error}=await client.from('quizlab_banks').select('course_id,subject,bank_json,bank_revision,updated_at').eq('owner_id',uid);if(error)throw error;assertContext(token);for(const row of data||[])if(bankCount(row.bank_json))rows.push({courseId:courseId(row.course_id),subject:cleanText(row.subject||row.course_id),bank:normalizeAdminBank(row.bank_json),provenance:'Cloud · revisione '+Number(row.bank_revision||0)});}
   catch(error){assertContext(token);message('Fonte locale caricata. La copia cloud non è disponibile: '+error.message);}
  }
- assertContext(token);showCandidates(rows);message(rows.length+' fonti caricate in sola lettura. Locale e cloud restano varianti separate. Per dati solo nell’estensione desktop, sincronizza o importa il suo backup.');
+ assertContext(token);showCandidates(groupBankSources(rows));message(new Set(rows.map(row=>row.courseId)).size+' materie caricate in sola lettura. Le copie identiche sono riunite; quelle differenti restano selezionabili. Per dati solo nell’estensione desktop, sincronizza o importa il suo backup.');
 }
 function invalidateContract(){contractPreview=null;el('contractPreview').replaceChildren();el('saveContract').disabled=true;}
 function contractFingerprint(){return JSON.stringify([el('targetUser').value,el('planPicker').value,el('contractAction').value,el('contractStart').value,el('paymentMode').value,el('installmentCount').value]);}
@@ -478,7 +480,7 @@ el('assignBank').addEventListener('click',()=>run(async token=>{
  const draft=assignmentDraft(),fingerprint=assignmentFingerprint,key='assign:'+JSON.stringify([draft.target.user_id,draft.mode,draft.id,draft.revision,draft.source.courseId,draft.bank,draft.subject]);
  if(!await confirmAdmin('Fonte: '+draft.source.subject+' · '+bankCount(draft.bank)+' domande · '+(draft.source.provenance||'File JSON')+'\nDestinatario: '+(draft.target.email||draft.target.user_id)+'\nOperazione: '+(draft.mode==='create'?'Crea nuova materia':'Aggiorna materia esistente')+'\nMateria destinazione: '+draft.subject+'\n'+diffText(draft.diff)+'\nRevisione precedente: '+draft.revision+'\nI suoi progressi non verranno sostituiti.','Conferma assegnazione',fingerprint,token))return;
  assertContext(token);const out=await rpc('quizlab_admin_assign_course_safe',{target_user_id:draft.target.user_id,target_course_id:draft.id,target_subject:draft.subject,incoming_bank:draft.bank,expected_revision:draft.revision,operation_mode:draft.mode,source_course_id:draft.source.courseId,request_id:requestId(key)});
- assertContext(token);if(out?.conflict)throw new Error('La materia è cambiata nel frattempo o l’identificativo è occupato: aggiorna e verifica di nuovo.');if(!out?.ok)throw new Error('Assegnazione non confermata dal database');await refreshAfterBankMutation(token);message('Materia assegnata a '+(draft.target.email||draft.target.user_id)+'. Progressi personali conservati.');
+ assertContext(token);if(out?.conflict)throw new Error('La materia è cambiata nel frattempo o l’identificativo è occupato: aggiorna e verifica di nuovo.');if(!out?.ok)throw new Error('Assegnazione non confermata dal database');el('bankCandidate').value='';el('assignCourseId').value='';el('assignSubject').value='';try{await refreshAfterBankMutation(token);}catch(error){assertContext(token);message('Assegnazione riuscita. Il riepilogo non è stato aggiornato: premi Aggiorna prima di altre operazioni. Non ripetere l’invio.');return;}message('Materia assegnata a '+(draft.target.email||draft.target.user_id)+'. Progressi personali conservati.');
 }));
 el('previewRestore').addEventListener('click',()=>run(async token=>{
  const id=el('bankHistory').value,snapshot=destinationSnapshot;if(!snapshot||!id)throw new Error('Seleziona una versione precedente.');const stored=await rpc('quizlab_admin_history_bank',{history_id:id});assertContext(token);

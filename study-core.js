@@ -3,7 +3,7 @@
  'use strict';
  const dayMs=86400000;
  const defaults=()=>({pushEnabled:false,showPushContent:false,categories:{study:true,progress:true,service:true,marketing:false},marketingConsent:false,
-  reminderTime:'19:00',quietStart:'22:00',quietEnd:'08:00',timeZone:'Europe/Rome',studyDays:[1,2,3,4,5,6,0],inactivityDays:3,countdowns:true,courseIds:[]});
+  reminderTime:'19:00',quietStart:'22:00',quietEnd:'08:00',timeZone:'Europe/Rome',studyDays:[1,2,3,4,5,6,0],inactivityDays:3,countdowns:true,courseIds:[],pausedCourseIds:[]});
  function pushPresentation(data,showContent=false){
   const generic={title:'QuizLab · '+(data.category==='service'?'Comunicazione di servizio':'Un nuovo promemoria'),body:'Apri QuizLab per leggere il messaggio.'};
   // Both the current account choice and the sender's explicit flag must permit content.
