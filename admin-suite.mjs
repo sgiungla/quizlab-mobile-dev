@@ -36,8 +36,20 @@ export function installAdminSuite(ctx){
   if(current==='cloud')return cloud();
   if(['notifications','commerce'].includes(current)){
    try{
-    const key=current;if(!mounted.has(key))mounted.set(key,(async()=>{const module=await import(key==='notifications'?'./notification-admin.js':'./commerce-admin.js');return(key==='notifications'?module.mountNotifications:module.mountCommerce)({client:ctx.client()});})().catch(e=>{mounted.delete(key);throw e;}));
-    const feature=await mounted.get(key);if(stamp!==generation||!ctx.permitted())return;await feature.refresh();applyTabs();
+    const key=current;
+    if(!mounted.has(key)){
+     const entry={ownerId:ctx.session()?.user?.id,initialRefreshAvailable:true,promise:null};
+     entry.promise=(async()=>{const module=await import(key==='notifications'?'./notification-admin.js':'./commerce-admin.js');return(key==='notifications'?module.mountNotifications:module.mountCommerce)({client:ctx.client()});})().catch(e=>{if(mounted.get(key)===entry)mounted.delete(key);throw e;});
+     mounted.set(key,entry);
+    }
+    const entry=mounted.get(key),feature=await entry.promise;
+    if(stamp!==generation||!ctx.permitted())return;
+    // Both modules already refresh during mounting. Consume that first result
+    // once; a later opening or a different account must refresh normally.
+    const initialForAccount=entry.initialRefreshAvailable&&entry.ownerId===ctx.session()?.user?.id;
+    entry.initialRefreshAvailable=false;
+    if(!initialForAccount)await feature.refresh();
+    if(stamp!==generation||!ctx.permitted())return;applyTabs();
    }catch(e){$('adminMessage').textContent=e.message;}
   }
  }

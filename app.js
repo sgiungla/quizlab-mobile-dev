@@ -34,6 +34,7 @@ let explicitAuthIntent=false;
 let guestDataPending=false;
 let workspaceGeneration=0;
 let syncRunId=0;
+let localCourseSaveSerial=0;
 let searchLimit=30;
 let studyTelemetryAt=0,studyTelemetryClean=null;
 let studyOverview=null,studyBackgroundBusy=false,studyOverviewUser=null;
@@ -60,7 +61,7 @@ async function refreshStudyBell(){
  try{const value=await studyRequest('unread');for(const el of document.querySelectorAll('[data-study-unread]'))el.textContent=value.unread?'('+value.unread+')':'';}catch{}
 }
 async function openStudyPanel(tab='goals'){
- if(!cloudState.user)throw new Error('Accedi prima al tuo account UniSgiunglaLab');await studyHeartbeat();
+ if(!cloudState.user)throw new Error('Accedi prima al tuo account UniSgiunglaLab');studyHeartbeat().catch(()=>{});
  return globalThis.QuizLabStudyUI.open({host:document.body,request:studyRequest,accountId:cloudState.user.id,deviceId:store.sync.clientId,tab,theme:currentTheme,platform:'pwa',currentAccount:()=>cloudState.user?.id,canStudy:featuresAllowed,onChange:()=>studyRefreshBackground().catch(()=>{}),pushDiagnostics:()=>collectPushDiagnostics(cloudState.user.id),
   navigate:({courseId,questionIds})=>{if(!featuresAllowed()||!store.courses[courseId])return;route={name:'dashboard',courseId};const c=course();const ids=questionIds?.length?questionIds:c.pendingReview;const by=new Map(qbank(c).map(q=>[q.id,q]));if(ids.length){startSession(ids.map(id=>by.get(id)).filter(Boolean),'Ripasso intelligente','review');if(session){session.reviewPolicy='clear-on-correct';recordStudyReviewFromNotification();}}else render();}});
 }
@@ -150,11 +151,13 @@ async function recordCloudFailure(error,op){
 }
 function clearCloudFailure(){if(store.sync)delete store.sync.cloudRetry;lastSyncError=false;}
 function cloudNoticeHtml(){
- if(cloudState.user&&cloudRetryState().code==='SYNC_NOT_CONVERGED')return '<section class="card"><h3 class="section-title">Sincronizzazione da verificare</h3><p class="subtle">Il cloud risponde, ma alcuni dati sono cambiati durante la sincronizzazione o non sono ancora confermati. I dati restano salvati su questo dispositivo.</p><p class="subtle">Ripeti «Sincronizza tutto» per verificare l’allineamento. I tentativi automatici restano distanziati.</p><div class="actions"><button class="btn secondary" data-action="sync-all">Sincronizza tutto</button></div></section>';
- if(!cloudState.user||!cloudUnavailable())return '';
+ const recovery=store.sync?.storageRecovery;
+ const localNotice=recovery?.incomplete?'<section class="card" role="status"><h3 class="section-title">Archivio locale da verificare</h3><p class="subtle">'+(recovery.reason==='indexeddb_unavailable'?'Sto usando la copia locale di riserva. I nuovi salvataggi riusciti restano su questo dispositivo; le copie saranno riunite quando l’archivio principale tornerà disponibile.':'Una copia locale non è leggibile. È mostrato l’archivio disponibile; la copia originale resta conservata e il recupero non è completo.')+'</p></section>':'';
+ if(cloudState.user&&cloudRetryState().code==='SYNC_NOT_CONVERGED')return localNotice+'<section class="card"><h3 class="section-title">Sincronizzazione da verificare</h3><p class="subtle">Il cloud risponde, ma alcuni dati sono cambiati durante la sincronizzazione o non sono ancora confermati. I dati restano salvati su questo dispositivo.</p><p class="subtle">Ripeti «Sincronizza tutto» per verificare l’allineamento. I tentativi automatici restano distanziati.</p><div class="actions"><button class="btn secondary" data-action="sync-all">Sincronizza tutto</button></div></section>';
+ if(!cloudState.user||!cloudUnavailable())return localNotice;
  const license=globalThis.UniSgiunglaLicense?.status?.()||{};
  const until=license.validUntil?new Date(license.validUntil).toLocaleString('it-IT'):'';
- return '<section class="card"><h3 class="section-title">Cloud temporaneamente non disponibile</h3><p class="subtle">Materie e progressi restano salvati su questo dispositivo. Puoi continuare a studiare'+(until?' fino al '+esc(until):' con la verifica di accesso ancora valida')+'. Le modifiche saranno sincronizzate quando il servizio tornerà disponibile.</p><p class="subtle">I tentativi automatici sono distanziati per evitare richieste ripetute. Puoi conservare anche un backup locale.</p><div class="actions"><button class="btn secondary" data-action="backup">Backup completo</button></div></section>';
+ return localNotice+'<section class="card"><h3 class="section-title">Cloud temporaneamente non disponibile</h3><p class="subtle">Materie e progressi restano salvati su questo dispositivo. Puoi continuare a studiare'+(until?' fino al '+esc(until):' con la verifica di accesso ancora valida')+'. Le modifiche saranno sincronizzate quando il servizio tornerà disponibile.</p><p class="subtle">I tentativi automatici sono distanziati per evitare richieste ripetute. Puoi conservare anche un backup locale.</p><div class="actions"><button class="btn secondary" data-action="backup">Backup completo</button></div></section>';
 }
 function syncBadgeModel(){
  const dirty=(store.sync?.dirtyCourseIds||[]).length;
@@ -239,10 +242,13 @@ function shape(c){
  return x;
 }
 function course(id=route.courseId){return id&&store.courses[id]?shape(store.courses[id]):null;}
+function copyCourseProgress(c){return{...c,...structuredClone({attempts:c.attempts||[],exams:c.exams||[],marked:c.marked||[],pendingReview:c.pendingReview||[],historicalWrong:c.historicalWrong||[],fullCampaign:c.fullCampaign,syncMeta:c.syncMeta})};}
+function sessionForCheckpoint(){if(!session)return null;const copy=structuredClone(session);delete copy.finishing;for(const answer of Object.values(copy.answers||{}))delete answer.saving;return copy;}
 async function saveCourse(id,c,{bankDirty=false}={}){
  if(!featuresAllowed())throw new Error('Accesso allo studio non disponibile: dati conservati');
  assertCourseId(id);
  const op=captureOperation();
+ const serial=++localCourseSaveSerial,previousCourse=store.courses[id],previousSync={...store.sync,dirtyCourseIds:[...(store.sync?.dirtyCourseIds||[])],dirtyBankCourseIds:[...(store.sync?.dirtyBankCourseIds||[])]};
  c.updatedAt=now();
  if(bankDirty){assertBankEditable(c);c.bankUpdatedAt=c.updatedAt;}
  store.courses[id]=c;
@@ -250,11 +256,21 @@ async function saveCourse(id,c,{bankDirty=false}={}){
  store.sync.dirtyCourseIds=uniq([...(store.sync.dirtyCourseIds||[]),id]);
  if(bankDirty)store.sync.dirtyBankCourseIds=uniq([...(store.sync.dirtyBankCourseIds||[]),id]);
  store.sync.lastLocalChangeAt=now();
- studyHeartbeat().catch(()=>{});
  const changeToken=store.sync.lastLocalChangeAt;
- const saved=await saveStore(store);
+ let saved;
+ try{saved=await saveStore(store,{progressCourseId:bankDirty?null:id});}
+ catch(error){
+  if(operationCurrent(op)&&store.courses[id]===c){
+   if(previousCourse)store.courses[id]=previousCourse;else delete store.courses[id];
+   if(!previousSync.dirtyCourseIds.includes(id))store.sync.dirtyCourseIds=(store.sync.dirtyCourseIds||[]).filter(value=>value!==id);
+   if(bankDirty&&!previousSync.dirtyBankCourseIds.includes(id))store.sync.dirtyBankCourseIds=(store.sync.dirtyBankCourseIds||[]).filter(value=>value!==id);
+   if(serial===localCourseSaveSerial&&store.sync.lastLocalChangeAt===changeToken)store.sync.lastLocalChangeAt=previousSync.lastLocalChangeAt;
+  }
+  throw error;
+ }
  if(!operationCurrent(op))return saved;
  if(store.sync?.lastLocalChangeAt===changeToken)store=saved;
+ studyHeartbeat().catch(()=>{});
  refreshSyncBadge();
  scheduleAutoSync();
  return saved;
@@ -450,24 +466,25 @@ function startSession(questions,title,mode='training'){
 function current(){return session?.questions?.[session.index]||null;}
 function sessionView(){
  const c=course(),q=current();if(!q)return setRoute('dashboard');
- const a=session.answers[q.id]||{},feedback=!!a.confirmed,mark=(c.marked||[]).includes(q.id),isExam=session.mode==='exam',isStudy=session.mode==='study';
+ const a=session.answers[q.id]||{},feedback=!!a.confirmed,mark=(c.marked||[]).includes(q.id),isExam=session.mode==='exam',isStudy=session.mode==='study',saving=!!a.saving||!!session.finishing;
  let html='<div class="stack"><section class="card"><div class="toolbar"><span class="pill">'+(session.index+1)+' / '+session.questions.length+'</span><span class="pill '+(q.source==='official'?'off':'ai')+'">'+(q.source==='official'?'Ufficiale':'AI')+'</span><span class="pill">Cap. '+esc(q.chapter)+'</span><span class="pill">'+esc(q.difficulty||'medium')+'</span>'+(q.topic?'<span class="pill">'+esc(q.topic)+'</span>':'')+(isExam?'<span class="pill" id="examTimer">'+fmtDuration(session.durationMs-(Date.now()-session.startedAt))+'</span>':'')+'<button class="btn ghost" data-action="mark">'+(mark?'★ Segnata':'☆ Segna')+'</button></div><div class="progress"><span style="width:'+(((session.index+1)/session.questions.length)*100)+'%"></span></div><div class="question">'+esc(q.text)+'</div>';
- for(const o of q.options||[]){let cl='option';if(a.selected===o.letter)cl+=' selected';if(isStudy&&o.letter===q.correct)cl+=' correct';if(!isExam&&!isStudy&&feedback&&o.letter===q.correct)cl+=' correct';if(!isExam&&!isStudy&&feedback&&a.selected===o.letter&&a.selected!==q.correct)cl+=' wrong';html+='<button class="'+cl+'" data-action="answer" data-letter="'+esc(o.letter)+'" '+(((feedback&&!isExam)||(isExam&&a.confirmed)||isStudy)?'disabled':'')+'><span class="letter">'+esc(o.letter)+'</span><span>'+esc(o.text)+'</span></button>';}
+ for(const o of q.options||[]){let cl='option';if(a.selected===o.letter)cl+=' selected';if(isStudy&&o.letter===q.correct)cl+=' correct';if(!isExam&&!isStudy&&feedback&&o.letter===q.correct)cl+=' correct';if(!isExam&&!isStudy&&feedback&&a.selected===o.letter&&a.selected!==q.correct)cl+=' wrong';html+='<button class="'+cl+'" data-action="answer" data-letter="'+esc(o.letter)+'" '+((saving||(feedback&&!isExam)||(isExam&&a.confirmed)||isStudy)?'disabled':'')+'><span class="letter">'+esc(o.letter)+'</span><span>'+esc(o.text)+'</span></button>';}
  if(isStudy){html+='<div class="feedback ok"><strong>✅ Risposta corretta evidenziata</strong>'+(q.explanation?'<p>'+esc(q.explanation)+'</p>':'')+(q.reference?'<p class="muted"><strong>Fonte:</strong> '+esc(q.reference)+'</p>':'')+'</div>';}
  else if(!isExam&&feedback){html+='<div class="feedback '+(a.correct?'ok':'bad')+'"><strong>'+(a.correct?'✓ Corretta':'✕ Errata · corretta '+esc(q.correct))+'</strong>'+(q.explanation?'<p>'+esc(q.explanation)+'</p>':'')+(q.reference?'<p class="muted"><strong>Fonte:</strong> '+esc(q.reference)+'</p>':'')+'</div>';}
  if(isExam){const examNextLabel=session.index===session.questions.length-1?(a.selected&&!a.confirmed?'Conferma e consegna':'Consegna'):(a.selected&&!a.confirmed?'Conferma e avanti →':'Avanti →');html+='<div class="actions"><button class="btn ghost" data-action="exam-prev" '+(session.index===0?'disabled':'')+'>← Indietro</button><button class="btn" data-action="exam-next">'+examNextLabel+'</button></div><p class="subtle">'+(a.confirmed?'Risposta registrata · nessuna correzione mostrata.':'Nessuna correzione durante la prova.')+' Le prime 30 determinano il voto; la 31ª vale solo per la lode.</p>';}
  else if(isStudy){html+='<div class="actions"><button class="btn ghost" data-action="study-prev" '+(session.index===0?'disabled':'')+'>← Indietro</button><button class="btn" data-action="study-next">'+(session.index===session.questions.length-1?'Fine':'Prossima →')+'</button></div>';}
- else {html+='<div class="actions">'+(!feedback?'<button class="btn" data-action="confirm" '+(a.selected?'':'disabled')+'>Conferma</button>':'<button class="btn" data-action="next">'+(session.index===session.questions.length-1?'Risultati':'Avanti →')+'</button>')+'</div>';}
+ else {html+='<div class="actions">'+(!feedback?'<button class="btn" data-action="confirm" '+(a.selected&&!saving?'':'disabled')+'>'+(saving?'Salvataggio…':'Conferma')+'</button>':'<button class="btn" data-action="next">'+(session.index===session.questions.length-1?'Risultati':'Avanti →')+'</button>')+'</div>';}
+ if(saving)html+='<p class="subtle" role="status" aria-live="polite">Salvataggio sul dispositivo…</p>';
  html+='</section></div>';page(html,c.subject,session.title,true);
 }
 
 async function confirmAnswer(){
  if(!featuresAllowed()){licensePage();return;}
  if(!session||session.mode==='exam'||session.mode==='study'||session.finished)return;
- const c=course(),q=current(),a=session.answers[q.id];if(!a?.selected||a.confirmed)return;
- const correct=a.selected===q.correct;a.confirmed=true;a.correct=correct;a.at=now();
- const elapsedMs=Date.now()-session.questionShownAt,meta=ensureCourseSyncMeta(c);
- c.attempts.push({eventId:newEventId(),questionId:q.id,chapter:q.chapter,source:q.source,difficulty:q.difficulty,correct,answer:a.selected,at:a.at,elapsedMs,mode:session.mode,...(session.mode==='review'?{reviewPolicy:session.reviewPolicy}:{} )});
+ const active=session,op=captureOperation(),c=copyCourseProgress(course()),q=current(),a=active.answers[q.id];if(!a?.selected||a.confirmed||a.saving)return;
+ const correct=a.selected===q.correct;a.eventId=a.eventId||newEventId();a.at=a.at||now();a.saving=true;
+ const elapsedMs=a.elapsedMs??(a.elapsedMs=Date.now()-session.questionShownAt),meta=ensureCourseSyncMeta(c);
+ c.attempts.push({eventId:a.eventId,questionId:q.id,chapter:q.chapter,source:q.source,difficulty:q.difficulty,correct,answer:a.selected,at:a.at,elapsedMs,mode:session.mode,...(session.mode==='review'?{reviewPolicy:session.reviewPolicy}:{} )});
  if(session.mode==='full'){
    c.fullCampaign=c.fullCampaign||{signature:'all',seenIds:[],resetAt:null};
    c.fullCampaign.seenIds=uniq([...(c.fullCampaign.seenIds||[]),q.id]);
@@ -480,9 +497,14 @@ async function confirmAnswer(){
   c.pendingReview=c.pendingReview.filter(id=>id!==q.id);
   meta.pendingState[q.id]={value:false,at:a.at};
  }
- await saveCourse(route.courseId,c);render();
+ render();
+ try{await saveCourse(route.courseId,c);if(operationCurrent(op)&&session===active){a.confirmed=true;a.correct=correct;}}
+ catch(error){if(operationCurrent(op)&&session===active){a.saving=false;render();}throw error;}
+ finally{a.saving=false;}
+ if(operationCurrent(op)&&session===active)render();
 }
-async function nextQuestion(){if(!session)return;const active=session,op=captureOperation();if(session.index<session.questions.length-1){session.index++;session.questionShownAt=Date.now();render();}else{await cloudSync({silent:true});if(!operationCurrent(op)||session!==active)return;route.name='results';render();}}
+function syncAfterLocalStudy(){clearTimeout(autoSyncTimer);autoSyncTimer=null;cloudSync({silent:true}).catch(error=>console.warn('Sincronizzazione studio in attesa',error));}
+async function nextQuestion(){if(!session)return;const active=session,op=captureOperation();if(session.index<session.questions.length-1){session.index++;session.questionShownAt=Date.now();render();}else{if(!operationCurrent(op)||session!==active)return;route.name='results';render();syncAfterLocalStudy();}}
 function recordExamAnswer(c,q,i,a,at){
  if(a.recorded)return;
  const answered=!!a.selected,correct=answered&&a.selected===q.correct;
@@ -497,32 +519,42 @@ function recordExamAnswer(c,q,i,a,at){
 async function confirmExamAnswer(){
  if(!featuresAllowed()){licensePage();return;}
  if(!session||session.mode!=='exam'||session.finished)return;
- const c=course(),q=current(),a=session.answers[q.id];if(!a?.selected||a.confirmed)return;
- a.elapsedMs=Math.max(0,Date.now()-session.questionShownAt);
- recordExamAnswer(c,q,session.index,a,now());
- await saveCourse(route.courseId,c);
+ const active=session,op=captureOperation(),c=copyCourseProgress(course()),q=current(),a=active.answers[q.id];if(!a?.selected||a.confirmed||a.saving||active.finishing)return;
+ a.eventId=a.eventId||newEventId();a.at=a.at||now();a.elapsedMs=a.elapsedMs??Math.max(0,Date.now()-active.questionShownAt);a.saving=true;
+ const staged={...a};recordExamAnswer(c,q,active.index,staged,a.at);render();
+ try{await saveCourse(route.courseId,c);if(operationCurrent(op)&&session===active)Object.assign(a,staged,{saving:false});}
+ catch(error){if(operationCurrent(op)&&session===active){a.saving=false;render();}throw error;}
+ finally{a.saving=false;}
 }
 async function finishExam(timeout=false){
  if(!featuresAllowed()){licensePage();return;}
- if(!session||session.mode!=='exam'||session.finished)return;
+ if(!session||session.mode!=='exam'||session.finished||session.finishing)return;
  const activeSession=session,op=captureOperation(),courseId=route.courseId;
- activeSession.finished=true;if(examTimer){clearInterval(examTimer);examTimer=null;}
- const c=course(courseId);let correct=0,lodeCorrect=false;const wrong=[],at=now();
+ activeSession.finishing=true;if(examTimer){clearInterval(examTimer);examTimer=null;}
+ const c=copyCourseProgress(course(courseId));let correct=0,lodeCorrect=false;const wrong=[],at=now(),stagedAnswers={};
  activeSession.questions.forEach((q,i)=>{
-  const a=activeSession.answers[q.id]||(activeSession.answers[q.id]={});
-  if(i===activeSession.index&&a.selected&&!a.recorded)a.elapsedMs=Math.max(0,Date.now()-activeSession.questionShownAt);
+  const original=activeSession.answers[q.id]||(activeSession.answers[q.id]={});
+  if(!original.recorded){original.eventId=original.eventId||newEventId();original.at=original.at||at;}
+  const a=stagedAnswers[q.id]={...original};
+  if(i===activeSession.index&&a.selected&&!a.recorded)a.elapsedMs=a.elapsedMs??Math.max(0,Date.now()-activeSession.questionShownAt);
   recordExamAnswer(c,q,i,a,at);
   const ok=a.correct,isLode=i===30;
   if(!isLode&&ok)correct++;if(isLode)lodeCorrect=ok;if(!ok)wrong.push(q.id);
  });
  const grade=correct,lode=correct===30&&lodeCorrect,elapsedMs=Date.now()-activeSession.startedAt;
- c.exams.push({eventId:newEventId(),at,grade,lode,correct30:correct,lodeCorrect,elapsedMs,timeout,wrongIds:wrong,questionIds:activeSession.questions.map(q=>q.id),answeredCount:Object.values(activeSession.answers).filter(a=>a?.selected).length});
- activeSession.examResult={grade,lode,correct,elapsedMs,wrong};
- await saveCourse(courseId,c);
+ activeSession.examEventId=activeSession.examEventId||newEventId();
+ c.exams.push({eventId:activeSession.examEventId,at,grade,lode,correct30:correct,lodeCorrect,elapsedMs,timeout,wrongIds:wrong,questionIds:activeSession.questions.map(q=>q.id),answeredCount:Object.values(activeSession.answers).filter(a=>a?.selected).length});
+ render();
+ try{await saveCourse(courseId,c);}
+ catch(error){
+  if(operationCurrent(op)&&session===activeSession){activeSession.finishing=false;if(activeSession.durationMs-(Date.now()-activeSession.startedAt)>0)startExamTimer();render();}
+  throw error;
+ }
+ finally{activeSession.finishing=false;}
  if(!operationCurrent(op)||session!==activeSession)return;
- await cloudSync({silent:true});
- if(!operationCurrent(op)||session!==activeSession)return;
- route.name='results';render();
+ for(const [id,answer]of Object.entries(stagedAnswers))Object.assign(activeSession.answers[id],answer,{saving:false});
+ activeSession.finished=true;activeSession.examResult={grade,lode,correct,elapsedMs,wrong};
+ route.name='results';render();syncAfterLocalStudy();
 }
 function results(){if(session?.mode==='exam'){const r=session.examResult;if(!r)return;page('<section class="card hero"><div class="eyebrow">🎓 Esito simulazione</div><h1>'+(r.lode?'30 e lode':r.grade+'/30')+'</h1><p>'+r.correct+'/30 corrette · '+fmtDuration(r.elapsedMs)+'</p><div class="actions"><button class="btn" data-action="dashboard">Dashboard</button><button class="btn secondary" data-action="retry-wrong">Ripassa gli errori</button></div></section>',course().subject,'Risultati',true);return;}const done=Object.entries(session.answers).filter(([,a])=>a.confirmed),ok=done.filter(([,a])=>a.correct).length,total=done.length;page('<section class="card hero"><div class="eyebrow">Sessione completata</div><h1>'+fmtGrade(gradeFromRatio(ok,total))+'</h1><p>'+ok+' / '+total+' · '+pct(total?ok/total:0)+' corrette</p><div class="actions"><button class="btn" data-action="dashboard">Torna alla materia</button><button class="btn secondary" data-action="retry-wrong">Ripassa gli errori</button></div></section>',course().subject,'Risultati',true);}
 
@@ -1403,6 +1435,7 @@ function render(){
 }
 
 app.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b)return;const a=b.dataset.action;
+ if((session?.finishing||session?.answers?.[current()?.id]?.saving)&&['answer','confirm','exam-prev','exam-next','mark','next','study-prev','study-next'].includes(a))return;
  if(a==='study-panel'){try{await openStudyPanel(b.dataset.studyTab||'goals');}catch(error){toast(error.message);}return;}
  if(a==='sign-out'){globalThis.QuizLabStudyUI?.close();navigator.serviceWorker?.controller?.postMessage({type:'QUIZLAB_PUSH_POLICY',userId:null});try{await studyRequest('revoke-device',{device_id:store.sync.clientId});}catch{}}
  const authActions=['sign-in','sign-up','sign-out','refresh-access','license-refresh','cloud','home','toggle-theme'];
@@ -1550,13 +1583,11 @@ if(a==='confirm'){await confirmAnswer();return;}if(a==='next'){await nextQuestio
 if(a==='exam-prev'){if(session.index>0){session.index--;session.questionShownAt=Date.now();render();}return;}
 if(a==='exam-next'){
  const active=session,op=captureOperation();if(!active)return;
- await confirmExamAnswer();
- if(!operationCurrent(op)||session!==active)return;
  if(session.index>=session.questions.length-1){await finishExam(false);}
- else{session.index++;session.questionShownAt=Date.now();render();}
+ else{await confirmExamAnswer();if(!operationCurrent(op)||session!==active)return;session.index++;session.questionShownAt=Date.now();render();}
  return;
 }
-if(a==='study-prev'){if(session.index>0){session.index--;render();}return;}if(a==='study-next'){if(session.index>=session.questions.length-1){await cloudSync({silent:true});setRoute('dashboard');}else{session.index++;render();}return;}
+if(a==='study-prev'){if(session.index>0){session.index--;render();}return;}if(a==='study-next'){if(session.index>=session.questions.length-1){setRoute('dashboard');syncAfterLocalStudy();}else{session.index++;render();}return;}
 if(a==='mark'){const c=course(),q=current(),set=new Set(c.marked),meta=ensureCourseSyncMeta(c),at=now();if(set.has(q.id)){set.delete(q.id);meta.markedState[q.id]={value:false,at};}else{set.add(q.id);meta.markedState[q.id]={value:true,at};}c.marked=[...set];await saveCourse(route.courseId,c);render();return;}
 if(a==='dashboard'){setRoute('dashboard');return;}
 if(a==='retry-wrong'){const c=course(),by=new Map(qbank(c).map(q=>[q.id,q])),ids=session.mode==='exam'?(session.examResult?.wrong||[]):Object.entries(session.answers).filter(([,v])=>v.confirmed&&!v.correct).map(([id])=>id),qs=ids.map(id=>by.get(id)).filter(Boolean);startSession(qs,'Errori sessione','review');return;}
@@ -1583,11 +1614,31 @@ async function openAdminFromLocation(){if(new URL(location.href).searchParams.ge
   return false;
  }
 }
-async function init(){store=await loadStore();if(!store.courses||typeof store.courses!=='object')store=emptyStore();for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await applyDefaultCloudConfig();await startCloud();if(!cloudState.user&&sync.configured(store.settings||{}))route.name='home';await openAdminFromLocation();window.addEventListener('online',async()=>{const gate=await refreshAccessGate({renderBlocked:false});if(gate.status==='active')await cloudSync({silent:true});else render();});window.addEventListener('focus',async()=>{const before=accessState.status;const gate=await refreshAccessGate({renderBlocked:false});if(gate.status==='active'&&cloudState.user)await cloudSync({silent:true});if(accessState.isAdmin)await refreshAdminPending();if(before!==gate.status)render();else refreshSyncBadge();});document.addEventListener('visibilitychange',async()=>{if(document.visibilityState==='visible'){const before=accessState.status;const gate=await refreshAccessGate({renderBlocked:false});if(gate.status==='active'&&cloudState.user)await cloudSync({silent:true});if(accessState.isAdmin)await refreshAdminPending();if(before!==gate.status)render();else refreshSyncBadge();}});setInterval(()=>{if(document.visibilityState==='visible'&&cloudState.user&&accessState.status==='active')cloudSync({silent:true});},120000);render();if('serviceWorker'in navigator)try{
+let foregroundRefresh=null,lastForegroundKey=null,lastForegroundAt=0;
+function refreshForeground(){
+ if(document.visibilityState!=='visible')return Promise.resolve();
+ const key=workspaceGeneration+':'+(cloudState.user?.id||'guest');
+ if(foregroundRefresh?.key===key)return foregroundRefresh.promise;
+ if(lastForegroundKey===key&&Date.now()-lastForegroundAt<1000)return Promise.resolve();
+ lastForegroundKey=key;lastForegroundAt=Date.now();
+ const request={key,promise:null},op=captureOperation();
+ request.promise=(async()=>{
+  const before=accessState.status,gate=await refreshAccessGate({renderBlocked:false});
+  if(!operationCurrent(op))return;
+  if(gate.status==='active'&&cloudState.user)await cloudSync({silent:true});
+  if(!operationCurrent(op))return;
+  if(accessState.isAdmin)await refreshAdminPending();
+  if(!operationCurrent(op))return;
+  if(before!==gate.status)render();else refreshSyncBadge();
+ })().catch(error=>console.warn('Aggiornamento al ritorno in primo piano',error)).finally(()=>{if(foregroundRefresh===request)foregroundRefresh=null;});
+ foregroundRefresh=request;return request.promise;
+}
+async function init(){store=await loadStore();if(!store.courses||typeof store.courses!=='object')store=emptyStore();for(const [id,c] of Object.entries(store.courses))store.courses[id]=shape(c);await applyDefaultCloudConfig();await startCloud();if(!cloudState.user&&sync.configured(store.settings||{}))route.name='home';await openAdminFromLocation();window.addEventListener('online',async()=>{const gate=await refreshAccessGate({renderBlocked:false});if(gate.status==='active')await cloudSync({silent:true});else render();});window.addEventListener('focus',refreshForeground);document.addEventListener('visibilitychange',refreshForeground);setInterval(()=>{if(document.visibilityState==='visible'&&cloudState.user&&accessState.status==='active')cloudSync({silent:true});},120000);render();if('serviceWorker'in navigator)try{
  const restored=restoreUpdateCheckpoint({accountId:cloudState.user?.id||null,courses:store.courses});if(restored&&featuresAllowed()){route=restored.route;session=restored.session;startExamTimer();render();}
- await installUpdates({version:APP_VERSION,checkpoint:async()=>{await saveStore(store);return {accountId:cloudState.user?.id||null,route,session};}});
+ await installUpdates({version:APP_VERSION,checkpoint:async()=>{await saveStore(store);return {accountId:cloudState.user?.id||null,route,session:sessionForCheckpoint()};}});
 }catch(e){console.warn(e);}studyRefreshBackground().catch(()=>{});openStudyFromLocation().catch(()=>{});}
 init().catch(e=>{app.innerHTML='<main class="main"><section class="card"><h2>Errore avvio</h2><p>'+esc(e?.message||e)+'</p></section></main>';});
+
 
 
 
