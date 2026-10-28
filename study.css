@@ -6,3 +6,6 @@
 
 /* Bounded local lists: preserve the existing theme and hide controls on short lists. */
 .ql-list-navigation{min-width:0;width:100%}.ql-list-navigation>[data-list-info]{margin:8px 0}.ql-list-navigation>[data-list-items]{display:grid;gap:14px}.ql-list-search{display:block;margin-bottom:12px}.ql-list-search input{display:block;box-sizing:border-box;width:100%;padding:10px;border:1px solid #477087;border-radius:10px;background:transparent;color:inherit;font:inherit}.ql-list-controls{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:12px 0}.ql-list-controls[hidden]{display:none!important}.ql-list-controls button:disabled{opacity:.45;cursor:default}
+
+/* Preserve the author's paragraphs and signature without interpreting HTML. */
+.study-overlay .study-notification-message{white-space:pre-wrap;overflow-wrap:anywhere}

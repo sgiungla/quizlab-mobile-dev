@@ -28,7 +28,9 @@ export const CAMPAIGN_EMOJIS=Object.freeze([
  {emoji:'🎯',label:'Obiettivo'},{emoji:'📚',label:'Studio'},{emoji:'🧠',label:'Memoria'},{emoji:'📝',label:'Esercitazione'},
  {emoji:'📖',label:'Lettura'},{emoji:'🔁',label:'Ripasso'},{emoji:'📅',label:'Esame'},{emoji:'⏳',label:'Countdown'},
  {emoji:'🔔',label:'Promemoria'},{emoji:'✅',label:'Completato'},{emoji:'🏆',label:'Traguardo'},{emoji:'🌟',label:'Risultato'},
- {emoji:'💪',label:'Motivazione'},{emoji:'👏',label:'Congratulazioni'},{emoji:'🎉',label:'Festeggiamento'},{emoji:'🚀',label:'Progresso'}
+ {emoji:'💪',label:'Motivazione'},{emoji:'👏',label:'Congratulazioni'},{emoji:'🎉',label:'Festeggiamento'},{emoji:'🚀',label:'Progresso'},
+ {emoji:'🐒',label:'Mascotte Sgiungla'},{emoji:'🌴',label:'Sgiungla'},{emoji:'🌿',label:'Crescita'},{emoji:'🍌',label:'Pausa Sgiungla'},
+ {emoji:'🧭',label:'Percorso'},{emoji:'💚',label:'Supporto'},{emoji:'🎓',label:'Università'},{emoji:'🛠️',label:'Manutenzione'}
 ].map(Object.freeze));
 export function renderCampaignEmojiButtons(){
  return CAMPAIGN_EMOJIS.map(e=>`<button type="button" class="btn secondary campaign-emoji" data-insert-emoji="${e.emoji}" title="${esc(e.label)}" aria-label="Inserisci emoji: ${esc(e.label)}"><span aria-hidden="true">${e.emoji}</span></button>`).join('');
