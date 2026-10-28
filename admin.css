@@ -8,6 +8,8 @@
 .admin-console details>summary{cursor:pointer;padding:12px 0;list-style-position:inside}
 .admin-console button:disabled{opacity:.55;cursor:not-allowed}
 .admin-console .actions{flex-wrap:wrap}
+.monitor-controls{display:flex;flex-wrap:wrap;gap:16px}.monitor-controls label{flex:1 1 220px;min-width:0}.monitor-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:14px 0}.monitor-stat{padding:18px;border:1px solid var(--line,#334155);border-radius:16px;min-width:0;background:rgba(20,184,166,.045);display:grid;gap:8px}.monitor-stat>span{font-size:13px;font-weight:650;opacity:.85}.monitor-stat strong{font-size:clamp(22px,3vw,30px);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.monitor-stat small{line-height:1.6;opacity:.8}.monitor-table-wrap{overflow:auto;max-width:100%}.monitor-table{width:100%;border-collapse:collapse;font-size:13px}.monitor-table th,.monitor-table td{padding:12px 8px;border-bottom:1px solid var(--line,#334155);text-align:left;white-space:nowrap}.egress-reading-details{margin-top:16px}.egress-status-line{padding:12px;border:1px solid var(--line,#334155);border-radius:12px}.monitor-empty{padding:20px;border:1px dashed var(--line,#334155);border-radius:14px;line-height:1.6}
+@media(max-width:600px){.monitor-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.monitor-stat{padding:12px}.monitor-stat strong{font-size:21px}.monitor-stat small{font-size:11px}}
 .account-tabs{display:flex;flex-wrap:wrap;gap:8px;border-block:1px solid var(--line,#334155);padding:14px 0;margin:18px 0}
 .account-tabs [aria-selected="true"]{background:#166534;color:#fff;border-color:#4ade80}
 .account-detail{border:2px solid #15803d}

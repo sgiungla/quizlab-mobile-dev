@@ -2,7 +2,8 @@
 import {validateEgress,egressView} from './egress.mjs';
 const encode=bytes=>btoa(String.fromCharCode(...new Uint8Array(bytes)));
 const base64url=bytes=>encode(bytes).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-const features=['lessons','kit_ai','question_banks','handouts','quizlab_desktop','quizlab_pwa'];
+const legacyFeatures=['lessons','kit_ai','question_banks','handouts','quizlab_desktop','quizlab_pwa'];
+const features=[...legacyFeatures,'gradebook'];
 export function createHandler({url,serviceKey,anonKey,fetcher=fetch,clock=()=>new Date()}){
  let keyPromise=null;
  async function jsonRequest(path,{token,body,service=false,method='POST'}={}){
@@ -37,7 +38,7 @@ export function createHandler({url,serviceKey,anonKey,fetcher=fetch,clock=()=>ne
   if(request.method==='OPTIONS')return new Response(null,{status:204,headers});
   try{
    const path=new URL(request.url).pathname.split('/quizlab-runtime')[1]||'/';
-   if(path==='/key'&&request.method==='GET')return answer({algorithm:'Ed25519',publicKey:(await signingKey()).publicSpki,release:'0.11.27'});
+   if(path==='/key'&&request.method==='GET')return answer({algorithm:'Ed25519',publicKey:(await signingKey()).publicSpki,release:'0.11.29'});
    if(!['/license','/egress'].includes(path))return answer({message:'Operazione non disponibile'},404);
    if((path==='/license'&&request.method!=='POST')||(path==='/egress'&&!['GET','POST'].includes(request.method)))return answer({message:'Metodo non consentito'},405);
    const authorization=request.headers.get('Authorization');
@@ -54,7 +55,10 @@ export function createHandler({url,serviceKey,anonKey,fetcher=fetch,clock=()=>ne
     const expiry=state.expiresAt?Date.parse(state.expiresAt):issued+86400000;
     if(!Number.isFinite(expiry))throw new Error('Scadenza accesso non valida');
     const validUntil=Math.max(issued,Math.min(issued+86400000,expiry));
-    const payload={version:2,userId:user.id,status:state.status,isAdmin:state.isAdmin===true,features:(state.features||[]).filter(x=>features.includes(x)),licenseRevision:Number(state.licenseRevision),issuedAt:new Date(issued).toISOString(),validUntil:new Date(validUntil).toISOString(),expiresAt:state.expiresAt||null};
+    // Negotiate only the vocabulary, never the permissions. Existing clients
+    // reject unknown feature names, so retain their signed six-module lease.
+    const vocabulary=new URL(request.url).searchParams.get('client_modules')==='2'?features:legacyFeatures;
+    const payload={version:2,userId:user.id,status:state.status,isAdmin:state.isAdmin===true,features:(state.features||[]).filter(x=>vocabulary.includes(x)),licenseRevision:Number(state.licenseRevision),issuedAt:new Date(issued).toISOString(),validUntil:new Date(validUntil).toISOString(),expiresAt:state.expiresAt||null};
     if(!Number.isSafeInteger(payload.licenseRevision)||payload.licenseRevision<1)throw new Error('Versione accesso non disponibile');
     const encoded=base64url(new TextEncoder().encode(JSON.stringify(payload))),key=await signingKey();
     const signature=await crypto.subtle.sign('Ed25519',key.key,new TextEncoder().encode(encoded));

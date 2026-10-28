@@ -8,7 +8,7 @@ const BANK_SCHEMA='unisgiunglalab.quizlab.bank',BACKUP_SCHEMA='unisgiunglalab.qu
 const cleanText=value=>String(value??'').replace(/\s+/g,' ').trim();
 const statusLabel=value=>({active:'Attivo',pending:'In attesa',suspended:'Sospeso',expired:'Scaduto'}[value]||'Da verificare');
 const PRODUCT_MODULES=Object.freeze([
- ['lessons','Lezioni'],['kit_ai','Kit AI'],['question_banks','Panieri'],['handouts','Dispense'],['quizlab_desktop','QuizLab desktop'],['quizlab_pwa','QuizLab web app']
+ ['lessons','Lezioni'],['kit_ai','Kit AI'],['question_banks','Panieri'],['handouts','Dispense'],['quizlab_desktop','QuizLab desktop'],['quizlab_pwa','QuizLab web app'],['gradebook','Libretto Sgiungla']
 ]);
 function moduleFlags(raw){return Object.fromEntries(PRODUCT_MODULES.map(([key])=>[key,raw?.[key]!==false]));}
 function moduleNames(raw){const flags=moduleFlags(raw);return PRODUCT_MODULES.filter(([key])=>flags[key]).map(([,label])=>label).join(', ')||'Nessuno strumento';}

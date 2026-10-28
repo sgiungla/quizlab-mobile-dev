@@ -4,7 +4,7 @@
   if (globalThis.UniSgiunglaLicense) return;
   const cfg = globalThis.QUIZLAB_LAB_CONFIG || {};
   const PREFIX = 'unisgiunglalab.access.lease.v1.';
-  const FEATURES = Object.freeze(['lessons','kit_ai','question_banks','handouts','quizlab_desktop','quizlab_pwa']);
+  const FEATURES = Object.freeze(['lessons','kit_ai','question_banks','handouts','quizlab_desktop','quizlab_pwa','gradebook']);
   const HWM = PREFIX + 'clock';
   const RETRY_PREFIX = PREFIX + 'retry.';
   const CHECK_INTERVAL_MS = 60000;

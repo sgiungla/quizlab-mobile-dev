@@ -1,6 +1,9 @@
 import {installUpdates,restoreUpdateCheckpoint} from './update-manager.mjs';
 import './egress-ui.js';
-import {loadStore,saveStore,emptyStore,workspaceMigrationInfo,selectWorkspace,currentWorkspaceKey} from './db.js';
+import {loadStore,saveStore as durableSaveStore,emptyStore,workspaceMigrationInfo,selectWorkspace,currentWorkspaceKey} from './db.js';
+import './performance-monitor.js';
+import './gradebook-core.js';
+import './gradebook-ui.js';
 import {QuizLabSyncAdapter} from './sync-adapter.js';
 import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
 import './study-core.js';
@@ -12,7 +15,7 @@ import {createAdminUserListState,adminUserPageRequest,applyAdminUserPage,readAdm
 
 const BANK_SCHEMA='unisgiunglalab.quizlab.bank';
 const BACKUP_SCHEMA='unisgiunglalab.quizlab.backup';
-const APP_VERSION='0.11.28';
+const APP_VERSION='0.11.29';
 const sync=new QuizLabSyncAdapter();
 const app=document.getElementById('app');
 const picker=document.getElementById('filePicker');
@@ -34,6 +37,24 @@ let explicitAuthIntent=false;
 let authBootPending=true;
 let guestDataPending=false;
 let workspaceGeneration=0;
+const startupObservedAt=performance.now();let startupMeasured=false;
+async function saveStore(...args){const end=globalThis.QuizLabPerformance?.start('local_save');try{const value=await durableSaveStore(...args);end?.({ok:true});return value;}catch(error){end?.({ok:false});throw error;}}
+function gradebookAllowed(){return !!cloudState.user&&accessState.status==='active'&&globalThis.UniSgiunglaLicense?.canUseFeature('gradebook')===true;}
+async function suiteRequest(path,body){
+ const id=cloudState.user?.id;if(!id||!sync.client)throw Error('Accedi a UniSgiunglaLab');
+ if(!navigator.onLine||sync.transportBlock?.())throw Error('Cloud temporaneamente non disponibile');
+ const result=await sync.readAuthSession(),remote=result.data?.session;
+ if(result.error||!remote?.access_token)throw result.error||Error('Verifica online necessaria');
+ if(id!==cloudState.user?.id||remote.user?.id!==id)throw Error('Account cambiato');
+ const response=await fetch(globalThis.QUIZLAB_LAB_CONFIG.suiteBase+'/'+path,{method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+remote.access_token,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify({...body,expected_user_id:id})}),signal:AbortSignal.timeout(12000)});
+ const value=await response.json();if(id!==cloudState.user?.id)throw Error('Account cambiato');
+ if(!response.ok)throw Object.assign(Error(value.message||'Operazione non disponibile'),{status:response.status,current:value.current});return value;
+}
+function gradebookOptions(){return{accountId:cloudState.user.id,currentAccount:()=>cloudState.user?.id,canUse:gradebookAllowed,request:suiteRequest,theme:()=>currentTheme,courses:Object.entries(store.courses||{}).map(([courseId,c])=>({courseId,subject:c.subject||courseId})),onChange:()=>studyRefreshBackground().catch(()=>{})};}
+let performanceOwner=null,performanceReady=null;
+function configurePerformance(){const id=cloudState.user?.id;if(!id)return Promise.resolve();if(performanceOwner===id)return performanceReady||Promise.resolve();performanceOwner=id;performanceReady=(async()=>{await globalThis.QuizLabPerformance?.configure({accountId:id,currentAccount:()=>cloudState.user?.id,canUpload:()=>baseAccessAllowed()&&navigator.onLine&&!sync.transportBlock?.(),request:suiteRequest,kind:/Android|iPhone|iPad/i.test(navigator.userAgent)?'pwa_mobile':'pwa_desktop'});if(id===cloudState.user?.id&&!startupMeasured){startupMeasured=true;globalThis.QuizLabPerformance?.observe('startup',performance.now()-startupObservedAt,{ok:baseAccessAllowed()});}})();return performanceReady;}
+let gradebookWidget=null;
+function mountGradebook(){gradebookWidget?.dispose?.();gradebookWidget=null;const host=app.querySelector('[data-gradebook-widget]');if(host&&gradebookAllowed())globalThis.QuizLabGradebookUI?.mountWidget(host,gradebookOptions()).then(value=>{if(host.isConnected)gradebookWidget=value;else value?.dispose?.();}).catch(()=>{});}
 let syncRunId=0;
 let localCourseSaveSerial=0;
 let searchLimit=30;
@@ -62,8 +83,9 @@ async function refreshStudyBell(){
  try{const value=await studyRequest('unread');for(const el of document.querySelectorAll('[data-study-unread]'))el.textContent=value.unread?'('+value.unread+')':'';}catch{}
 }
 async function openStudyPanel(tab='goals'){
+ if(tab==='exams'&&gradebookAllowed())return globalThis.QuizLabGradebookUI.open(gradebookOptions());
  if(!cloudState.user)throw new Error('Accedi prima al tuo account UniSgiunglaLab');studyHeartbeat().catch(()=>{});
- return globalThis.QuizLabStudyUI.open({host:document.body,request:studyRequest,accountId:cloudState.user.id,deviceId:store.sync.clientId,tab,theme:currentTheme,platform:'pwa',currentAccount:()=>cloudState.user?.id,canStudy:featuresAllowed,onChange:()=>studyRefreshBackground().catch(()=>{}),pushDiagnostics:()=>collectPushDiagnostics(cloudState.user.id),
+ return globalThis.QuizLabStudyUI.open({host:document.body,request:studyRequest,openGradebook:gradebookAllowed()?()=>globalThis.QuizLabGradebookUI.open(gradebookOptions()):null,accountId:cloudState.user.id,deviceId:store.sync.clientId,tab,theme:currentTheme,platform:'pwa',currentAccount:()=>cloudState.user?.id,canStudy:featuresAllowed,onChange:()=>studyRefreshBackground().catch(()=>{}),pushDiagnostics:()=>collectPushDiagnostics(cloudState.user.id),
   navigate:({courseId,questionIds})=>{if(!featuresAllowed()||!store.courses[courseId])return;route={name:'dashboard',courseId};const c=course();const ids=questionIds?.length?questionIds:c.pendingReview;const by=new Map(qbank(c).map(q=>[q.id,q]));if(ids.length){startSession(ids.map(id=>by.get(id)).filter(Boolean),'Ripasso intelligente','review');if(session){session.reviewPolicy='clear-on-correct';recordStudyReviewFromNotification();}}else render();}});
 }
 async function studyRefreshBackground(){
@@ -364,9 +386,9 @@ function top(title,sub,back){
 function bottomNavHtml(){
  const active=route.name;
  const item=(action,label,icon,names)=>'<button data-action="'+action+'" class="'+(names.includes(active)?'active':'')+'"><span>'+icon+'</span><small>'+label+'</small></button>';
- return '<nav class="mobile-bottom-nav">'+item('home','Home','⌂',['home'])+item('profile','Profilo','◉',['profile'])+item('cloud','Cloud','☁',['cloud','access'])+(accessState.isAdmin?item('open-admin','Admin','🛡',['admin']):'')+'</nav>';
+ return '<nav class="mobile-bottom-nav">'+item('home','Home','⌂',['home'])+(gradebookAllowed()?item('gradebook','Libretto','📗',[]):'')+item('profile','Profilo','◉',['profile'])+item('cloud','Cloud','☁',['cloud','access'])+(accessState.isAdmin?item('open-admin','Admin','🛡',['admin']):'')+'</nav>';
 }
-function page(body,title='QuizLab · Sgiungla',sub='Mobile · offline-first',back=false){app.innerHTML='<div class="app-frame">'+top(title,sub,back)+'<main class="main">'+((route.name==='home'||route.name==='dashboard')&&featuresAllowed()?'<div data-study-summary>'+studySummaryHtml()+'</div>':'')+body+'</main>'+bottomNavHtml()+'</div>';}
+function page(body,title='QuizLab · Sgiungla',sub='Mobile · offline-first',back=false){app.innerHTML='<div class="app-frame">'+top(title,sub,back)+'<main class="main">'+(!authBootPending&&route.name==='home'&&gradebookAllowed()?'<div data-gradebook-widget></div>':'')+((route.name==='home'||route.name==='dashboard')&&featuresAllowed()?'<div data-study-summary>'+studySummaryHtml()+'</div>':'')+body+'</main>'+bottomNavHtml()+'</div>';Promise.resolve().then(mountGradebook).catch(()=>{});}
 function setRoute(name,courseId=route.courseId){if(name==='admin'&&!localAdminMonitorAllowed()){location.assign('./admin.html');return;}if(examTimer){clearInterval(examTimer);examTimer=null;}route={name,courseId};session=null;render();}
 
 function home(){
@@ -641,6 +663,8 @@ async function saveProfile({pushOnly=false}={}){
 }
 
 async function selectWorkspaceForSession(authSession,{explicit=false}={}){
+ if(performanceOwner!==(authSession?.user?.id||null)){performanceOwner=null;performanceReady=null;globalThis.QuizLabPerformance?.configure(null).catch(()=>{});}
+ if(globalThis.QuizLabGradebookUI?.active?.()?.accountId!==authSession?.user?.id)globalThis.QuizLabGradebookUI?.close();
  const user=authSession?.user||null;
  if(cloudState.user?.id!==user?.id)navigator.serviceWorker?.controller?.postMessage({type:'QUIZLAB_PUSH_POLICY',userId:null});
  if(globalThis.QuizLabStudyUI?.active()?.accountId!==user?.id)globalThis.QuizLabStudyUI?.close();
@@ -806,6 +830,7 @@ async function refreshAccessGate({renderBlocked=true,force=false}={}){
   const state=await sync.accessState();
   requireOperation(op);accessState=state;
   if(accessState.status!=='active'){
+   globalThis.QuizLabGradebookUI?.close();
    clearTimeout(autoSyncTimer);
    if(examTimer){clearInterval(examTimer);examTimer=null;}
    session=null;
@@ -823,7 +848,11 @@ async function refreshAccessGate({renderBlocked=true,force=false}={}){
   return accessState;
  }
 }
-async function cloudSync({silent=true,ignoreBackoff=false,throwOnFailure=false}={}){
+async function cloudSync(options={}){
+ const measured=featuresAllowed()&&cloudState.user&&navigator.onLine&&!syncInFlight&&(!cloudRetryBlocked()||options.ignoreBackoff),end=measured?globalThis.QuizLabPerformance?.start('cloud_sync'):null;
+ try{const value=await cloudSyncMeasured(options);end?.({ok:value===true});return value;}catch(error){end?.({ok:false});throw error;}
+}
+async function cloudSyncMeasured({silent=true,ignoreBackoff=false,throwOnFailure=false}={}){
  if(ignoreBackoff)globalThis.localStorage?.removeItem?.(sync.transportRetryKey);
  if(!featuresAllowed())return false;
  if(!cloudState.user||!navigator.onLine)return false;
@@ -1090,7 +1119,7 @@ async function startCloud(){
     await openAdminFromLocation();if(!operationCurrent(op))return;
    }else route.name='access';
   }
-  render();return true;
+  configurePerformance().catch(()=>{});render();return true;
  }
  try{
   await applyDefaultCloudConfig();
@@ -1118,7 +1147,7 @@ async function startCloud(){
   else if(!initial?.user&&activationAccount===undefined){cloudState=initial;await globalThis.UniSgiunglaLicense?.refresh();}
   await activationPending;
  }catch(e){console.warn('Cloud init',e);lastSyncError=true;}
- finally{authBootPending=false;render();}
+ finally{authBootPending=false;configurePerformance().catch(()=>{});render();}
 }
 
 function accessPage(){
@@ -1450,7 +1479,7 @@ function licensePage(){
  else body+='<p>'+esc(user.email||user.id)+'</p><div class="actions"><button class="btn" data-action="license-refresh">Verifica accesso</button><button class="btn secondary" data-action="sign-out">Esci</button></div>';
  page(body+'</section>','QuizLab','Verifica accesso',false);
 }
-window.addEventListener('unisgiungla-license-change',()=>{if(!authBootPending&&!featuresAllowed()){session=null;clearTimeout(autoSyncTimer);}render();});
+window.addEventListener('unisgiungla-license-change',()=>{if(!authBootPending&&!featuresAllowed()){session=null;clearTimeout(autoSyncTimer);}if(!gradebookAllowed())globalThis.QuizLabGradebookUI?.close();render();});
 
 function mountEgress(){
  const host=app.querySelector('[data-egress-host]'),id=cloudState.user?.id;
@@ -1460,12 +1489,14 @@ function render(){
  if(authBootPending){page('<section class="card hero" role="status" aria-live="polite"><h1>Ripristino accesso…</h1><p class="subtle">Sto verificando il tuo account. I dati salvati restano su questo dispositivo.</p></section>','QuizLab','Ripristino accesso',false);return;}
  Promise.resolve().then(mountEgress).catch(()=>{});
  if(!baseAccessAllowed()){licensePage();return;}
+ if(!featuresAllowed()&&gradebookAllowed()&&route.name==='home'){page('<section class="card"><h2>Il tuo percorso UniSgiunglaLab 🌴</h2><p>Esami, crediti e voti reali nel tuo Libretto Sgiungla.</p><button class="btn" data-action="gradebook">Apri libretto</button></section>','UniSgiunglaLab','Il tuo percorso');return;}
  if(!featuresAllowed()&&!['profile','cloud','admin'].includes(route.name)){licensePage();return;}
  if(cloudState.user&&accessState.status!=='active'&&route.name!=='access'){route.name='access';session=null;}
  if(route.name==='home')home();else if(route.name==='dashboard')dashboard();else if(route.name==='training')training(route.presetChapter);else if(route.name==='session')sessionView();else if(route.name==='results')results();else if(route.name==='review')reviewPage();else if(route.name==='search')searchPage();else if(route.name==='profile')profilePage();else if(route.name==='cloud')cloudPage();else if(route.name==='access')accessPage();else if(route.name==='admin')adminPage();else home();
 }
 
 app.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b)return;const a=b.dataset.action;
+ if(a==='gradebook'){if(!await globalThis.UniSgiunglaLicense?.checkFeature('gradebook')){toast('Libretto non abilitato per questo account');return;}try{await globalThis.QuizLabGradebookUI.open(gradebookOptions());}catch(error){toast(error.message);}return;}
  if((session?.finishing||session?.answers?.[current()?.id]?.saving)&&['answer','confirm','exam-prev','exam-next','mark','next','study-prev','study-next'].includes(a))return;
  if(a==='study-panel'){try{await openStudyPanel(b.dataset.studyTab||'goals');}catch(error){toast(error.message);}return;}
  if(a==='sign-out'){const logoutUser=cloudState.user?.id,logoutDevice=store.sync.clientId;globalThis.QuizLabStudyUI?.close();navigator.serviceWorker?.controller?.postMessage({type:'QUIZLAB_PUSH_POLICY',userId:null});try{const reg=await navigator.serviceWorker?.getRegistration();if(cloudState.user?.id===logoutUser)await(await reg?.pushManager?.getSubscription())?.unsubscribe();}catch{}try{if(cloudState.user?.id===logoutUser)await studyRequest('revoke-device',{device_id:logoutDevice,expected_user_id:logoutUser});}catch{}}
@@ -1597,7 +1628,7 @@ if(a==='force-app-update'){await forceAppUpdate();return;}
 
 if(a==='avatar-pick'){document.getElementById('avatarPicker')?.click();return;}
 if(a==='save-profile'){await saveProfile();return;}
-if(a==='import'){picker.value='';picker.click();return;}if(a==='backup'){backup();return;}if(a==='open'){setRoute('dashboard',b.dataset.id);return;}if(a==='export'){exportCourse(b.dataset.id||route.courseId);return;}
+if(a==='import'){picker.value='';picker.click();return;}if(a==='backup'){backup();return;}if(a==='open'){const end=globalThis.QuizLabPerformance?.start('course_open');try{setRoute('dashboard',b.dataset.id);requestAnimationFrame(()=>end?.({ok:true}));}catch(error){end?.({ok:false});throw error;}return;}if(a==='export'){exportCourse(b.dataset.id||route.courseId);return;}
 if(a==='training'){setRoute('training');return;}if(a==='review-page'){setRoute('review');return;}if(a==='search'){setRoute('search');return;}if(a==='review'){review(b.dataset.kind);return;}
 if(a==='train-chapter'){route.presetChapter=Number(b.dataset.chapter);route.name='training';session=null;render();return;}
 if(a==='start-chapter'){const c=course(),ch=Number(document.getElementById('chapterSelect').value),src=document.getElementById('chapterSource').value,p=filterSource(qbank(c).filter(q=>Number(q.chapter)===ch),src),n=amountValue('chapterAmount',p.length);startSession(selectTraining(p,n,src),'Allenamento capitolo '+ch,'chapter');return;}
@@ -1610,7 +1641,7 @@ if(a==='reset-performance'){await resetPerformance();return;}
 if(a==='reset-review'){await resetReview();return;}
 if(a==='exam'||a==='start-exam'){const c=course(),qs=selectTraining(qbank(c),31,'mixed');startSession(qs,'Simulazione esame','exam');return;}
 if(a==='answer'){const q=current();if(!q)return;session.answers[q.id]={...(session.answers[q.id]||{}),selected:b.dataset.letter};render();return;}
-if(a==='confirm'){await confirmAnswer();return;}if(a==='next'){await nextQuestion();return;}
+if(a==='confirm'){const end=globalThis.QuizLabPerformance?.start('answer');try{await confirmAnswer();end?.({ok:true});}catch(error){end?.({ok:false});throw error;}return;}if(a==='next'){await nextQuestion();return;}
 if(a==='exam-prev'){if(session.index>0){session.index--;session.questionShownAt=Date.now();render();}return;}
 if(a==='exam-next'){
  const active=session,op=captureOperation();if(!active)return;

@@ -6,9 +6,11 @@ import {Buffer} from 'node:buffer';
 import {wrapDatabase,createAdapter} from './adapter.mjs';
 import {createStudyModule} from './study.mjs';
 import {createLocalCommerce} from './commerce.mjs';
+import {createGradebookModule} from './gradebook.mjs';
+import {createPerformanceModule} from './performance.mjs';
 
-const VERSION='0.11.28',url=Deno.env.get('SUPABASE_URL')!,service=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const sql=postgres(Deno.env.get('SUPABASE_DB_URL')!,{max:2,prepare:false,connect_timeout:8,idle_timeout:10,connection:{application_name:'quizlab-suite-0.11.28'}});
+const VERSION='0.11.29',url=Deno.env.get('SUPABASE_URL')!,service=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const sql=postgres(Deno.env.get('SUPABASE_DB_URL')!,{max:2,prepare:false,connect_timeout:8,idle_timeout:10,connection:{application_name:'quizlab-suite-0.11.29'}});
 const metrics=new AsyncLocalStorage<{bytes:number}>();
 const db=wrapDatabase(sql,n=>{const m=metrics.getStore();if(m)m.bytes+=n;});
 const lab=createAdapter(db);
@@ -28,7 +30,7 @@ async function modules(){
    if(!response.ok)throw Object.assign(Error('Push provider error'),{statusCode:response.status});
    await response.body?.cancel();return{statusCode:response.status};
   };
-  return{settings,study:createStudyModule({lab,vapid:settings,allowRealPush:true,sendPush}),commerce:createLocalCommerce({lab,secret:settings.commerceSecret})};
+  return{settings,study:createStudyModule({lab,vapid:settings,allowRealPush:true,sendPush}),commerce:createLocalCommerce({lab,secret:settings.commerceSecret}),gradebook:createGradebookModule({lab}),performance:createPerformanceModule({lab})};
  })().catch(e=>{modulesPromise=null;throw e;});
  return modulesPromise;
 }
@@ -51,10 +53,11 @@ async function handle(req:Request){
  const m={bytes:0};return metrics.run(m,async()=>{
  let status=200,data:any;
  try{
-  if(route==='health'){return Response.json({version:VERSION,mode:'production',noRealCharge:true,scheduler:'minute',notificationPolicy:3}, {headers:cors(req)});}
+  if(route==='health'){return Response.json({version:VERSION,mode:'production',noRealCharge:true,scheduler:'minute',notificationPolicy:4}, {headers:cors(req)});}
   if(!['GET','POST'].includes(req.method))throw Object.assign(Error('Metodo non consentito'),{status:405});
-  if(Number(req.headers.get('content-length')||0)>65536)throw Object.assign(Error('Richiesta troppo grande'),{status:413});
-  const {study,commerce,settings}=await modules();
+  const maxBody=route==='gradebook'?524288:65536;
+  if(Number(req.headers.get('content-length')||0)>maxBody)throw Object.assign(Error('Richiesta troppo grande'),{status:413});
+  const {study,commerce,settings,gradebook,performance}=await modules();
   if(route==='tick'){
    const token=req.headers.get('X-QuizLab-Scheduler')||'',a=Buffer.from(token),b=Buffer.from(settings.schedulerToken);
    if(req.method!=='POST'||a.length!==b.length||!timingSafeEqual(a,b))throw Object.assign(Error('Accesso scheduler richiesto'),{status:401});
@@ -63,12 +66,13 @@ async function handle(req:Request){
    const publicCatalog=route==='commerce/catalog'&&req.method==='GET';
    const id=publicCatalog?null:await user(req);
    if(id)await rate(id,route);
-   const raw=req.method==='POST'?await req.text():'';if(raw.length>65536)throw Object.assign(Error('Richiesta troppo grande'),{status:413});
+   const raw=req.method==='POST'?await req.text():'';if(new TextEncoder().encode(raw).byteLength>maxBody)throw Object.assign(Error('Richiesta troppo grande'),{status:413});
    let input:any={};try{input=raw?JSON.parse(raw):{};}catch{throw Object.assign(Error('Richiesta non valida'),{status:400});}
    if(!input||Array.isArray(input)||typeof input!=='object')throw Object.assign(Error('Richiesta non valida'),{status:400});
    if(input.expected_user_id&&input.expected_user_id!==id)throw Object.assign(Error('Account cambiato'),{status:403});
    const offset=Number(u.searchParams.get('offset')||0);if(!Number.isInteger(offset)||offset<0||offset>100000)throw Object.assign(Error('Pagina non valida'),{status:400});
    const get:Record<string,()=>any>={
+    'gradebook':()=>gradebook.read(id),'admin/performance':()=>performance.report(id,{days:Number(u.searchParams.get('days')||7)}),
     'study/preferences':()=>study.prefs(id),'study/dashboard':()=>study.dashboard(id),'study/devices':()=>study.listDevices(id),
     'study/summary':()=>study.summary(id),'study/unread':()=>study.unread(id),
     'study/inbox':()=>study.inbox(id,{offset,archived:u.searchParams.get('archived')==='true'}),
@@ -78,6 +82,7 @@ async function handle(req:Request){
     'admin/traffic':async()=>{if(!await lab.rpc(id,'quizlab_is_admin'))throw Object.assign(Error('Amministratore richiesto'),{status:403});return{source:'server-logical-response-bytes',estimate:true,officialEgress:false,rows:(await db.query("select day,route,requests,response_bytes,database_logical_bytes,last_response_bytes,last_database_logical_bytes,errors,last_at from quizlab_release_private.suite_traffic where day>=current_date-31 order by day desc,route")).rows,scheduler:(await db.query('select enabled,last_run,lease_until from quizlab_release_private.suite_scheduler where singleton')).rows[0]};}
    };
    const post:Record<string,()=>any>={
+    'gradebook':()=>gradebook.mutate(id,input),'performance/collect':()=>performance.collect(id,input),
     'study/preferences':()=>study.savePreferences(id,input),'study/item':()=>study.saveItem(id,input),'study/device':()=>study.registerDevice(id,input),
     'study/heartbeat':()=>study.heartbeat(id,input),'study/revoke-device':()=>study.revokeDevice(id,input),'study/mark':()=>study.mark(id,input),
     'study/receipt':()=>study.receipt(id,input),'study/diagnostics':()=>study.saveDiagnostics(id,input),'study/test-push':()=>study.testPush(id,input),
@@ -88,10 +93,10 @@ async function handle(req:Request){
    };
    const action=(req.method==='GET'?get:post)[route];if(!action)throw Object.assign(Error('Operazione non disponibile'),{status:404});data=await action();
   }
- }catch(e:any){status=e.status||(/^23/.test(e.code||'')?409:503);data={message:status<500?e.message:'Servizio temporaneamente non disponibile. I dati locali restano conservati.'};console.warn('QuizLab suite',route,status,e.code||e.name);}
+ }catch(e:any){status=e.status||(/^23/.test(e.code||'')?409:503);data={message:status<500?e.message:'Servizio temporaneamente non disponibile. I dati locali restano conservati.',...(status===409&&e.current?{current:e.current}:{})};console.warn('QuizLab suite',route,status,e.code||e.name);}
  const json=JSON.stringify(data),bytes=new TextEncoder().encode(json).byteLength;
  // Aggregate sizes only: never store request bodies, tokens, endpoints or student text in traffic logs.
- if(route!=='tick'||status===200)try{await db.query("insert into quizlab_release_private.suite_traffic(day,route,requests,response_bytes,database_logical_bytes,errors,last_response_bytes,last_database_logical_bytes)values(current_date,$1,1,$2,$3,$4,$2,$3)on conflict(day,route)do update set requests=suite_traffic.requests+1,response_bytes=suite_traffic.response_bytes+excluded.response_bytes,database_logical_bytes=suite_traffic.database_logical_bytes+excluded.database_logical_bytes,errors=suite_traffic.errors+excluded.errors,last_response_bytes=excluded.last_response_bytes,last_database_logical_bytes=excluded.last_database_logical_bytes,last_at=now()",[/^(study|commerce|admin)\/[a-z-]+$/.test(route)?route:route==='tick'?'tick':'unknown',bytes,m.bytes,status>=400?1:0]);}catch{}
+ if(route!=='tick'||status===200)try{await db.query("insert into quizlab_release_private.suite_traffic(day,route,requests,response_bytes,database_logical_bytes,errors,last_response_bytes,last_database_logical_bytes)values(current_date,$1,1,$2,$3,$4,$2,$3)on conflict(day,route)do update set requests=suite_traffic.requests+1,response_bytes=suite_traffic.response_bytes+excluded.response_bytes,database_logical_bytes=suite_traffic.database_logical_bytes+excluded.database_logical_bytes,errors=suite_traffic.errors+excluded.errors,last_response_bytes=excluded.last_response_bytes,last_database_logical_bytes=excluded.last_database_logical_bytes,last_at=now()",[(/^(study|commerce|admin|performance)\/[a-z-]+$/.test(route)||route==='gradebook')?route:route==='tick'?'tick':'unknown',bytes,m.bytes,status>=400?1:0]);}catch{}
  return new Response(json,{status,headers:cors(req)});
  });
 }

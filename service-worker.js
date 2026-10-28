@@ -104,7 +104,7 @@
  root.QuizLabStudyCore=core;if(typeof module!=='undefined'&&module.exports)module.exports=core;
 })(typeof globalThis==='undefined'?this:globalThis);
 
-const CACHE='quizlab-v0.11.28-r11';
+const CACHE='quizlab-v0.11.29-r1';
 const ROOT=new URL('./',self.location.href);
 const INDEX=new URL('./index.html',ROOT).href;
 const MANIFEST=new URL('./asset-manifest.json',ROOT).href;
@@ -119,7 +119,7 @@ const assetUrls=async()=>{
 self.addEventListener('install',event=>event.waitUntil((async()=>{
  const manifestRequest=new URL(MANIFEST);manifestRequest.searchParams.set('build',CACHE+'-'+Date.now());
  const response=await fetch(manifestRequest,{cache:'no-store'});if(!response.ok)throw Error('Release manifest unavailable');
- const data=await response.clone().json();if(data.version!=='0.11.28'||!Array.isArray(data.assets)||!data.sha256)throw Error('Incoherent release');
+ const data=await response.clone().json();if(data.version!=='0.11.29'||!Array.isArray(data.assets)||!data.sha256)throw Error('Incoherent release');
  const urls=data.assets.map(x=>new URL(x,ROOT));if(urls.some(u=>u.origin!==ROOT.origin||!u.href.startsWith(ROOT.href)))throw Error('Invalid asset path');
  const validated=[];
  // Validate every byte before exposing this release. A cached CDN response from

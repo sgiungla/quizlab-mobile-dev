@@ -279,7 +279,7 @@ export class QuizLabSyncAdapter {
 
   async cloudFetch(input,init={}){
     let endpoint=new URL(typeof input==='string'?input:input.url);
-    if(endpoint.pathname==='/rest/v1/rpc/quizlab_license'){endpoint=new URL('/functions/v1/quizlab-runtime/license',endpoint);input=endpoint.href;}
+    if(endpoint.pathname==='/rest/v1/rpc/quizlab_license'){endpoint=new URL('/functions/v1/quizlab-runtime/license?client_modules=2',endpoint);input=endpoint.href;}
     if(!["https://eqrcdvhhfrkpmnzqoerr.supabase.co"].includes(endpoint.origin)||endpoint.username||endpoint.password)throw new Error('Collegamento cloud non consentito');
     const authRequest=endpoint.pathname.startsWith('/auth/v1/');
     let backoff;try{backoff=JSON.parse(globalThis.localStorage?.getItem(this.transportRetryKey)||'null');}catch{}
