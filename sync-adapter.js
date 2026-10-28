@@ -221,7 +221,9 @@ export class QuizLabSyncAdapter {
     if(event==='INITIAL_SESSION' && !session && this.session?.offlineIdentity && this.offlineIdentityGeneration===this.generation)return;
     if(this.signedOutLocally && session)return;
     if(session&&this.offlineAutoRefreshDisabled){this.offlineAutoRefreshDisabled=false;this.client?.auth?.startAutoRefresh?.();}
-    if(this.user()?.id!==session?.user?.id || ['SIGNED_OUT','SIGNED_IN'].includes(event))this.generation++;
+    // Reconfirmation/refresh of the same owner is not an account boundary.
+    // Explicit signIn/signUp/signOut invalidate operations in their own methods.
+    if(this.user()?.id!==session?.user?.id || event==='SIGNED_OUT')this.generation++;
     const cached=!session&&!this.signedOutLocally?this.cachedIdentity():null;
     const localIdentity=cached?.id===this.user()?.id?cached:null;
     this.session=session||(localIdentity?{user:localIdentity,offlineIdentity:true}:null);
@@ -231,6 +233,23 @@ export class QuizLabSyncAdapter {
     this.authContext?.onAuthChange?.({event,session:this.session,status:this.status});
   }
 
+  async readAuthSession(){
+    // The SDK can wait on its initialization/refresh lock beyond an individual
+    // fetch timeout. Keep local startup bounded without fabricating a session
+    // or deleting persisted credentials when that lock is slow.
+    let timer;const token=this.operationToken(),client=this.client;
+    try{
+      return await Promise.race([client.auth.getSession(),new Promise(resolve=>{
+        timer=setTimeout(()=>{
+          if(client===this.client&&this.isOperationCurrent(token)&&!this.transportBlock()){
+            try{globalThis.localStorage?.setItem(this.transportRetryKey,JSON.stringify({endpoint:'https://eqrcdvhhfrkpmnzqoerr.supabase.co',status:408,failures:1,until:Date.now()+60000}));}catch{}
+          }
+          resolve({error:Object.assign(new Error('Ripristino cloud temporaneamente in attesa'),{name:'TimeoutError',status:408})});
+        },12000);
+      })]);
+    }finally{clearTimeout(timer);}
+  }
+
   async recoverSession(){
     if(!this.client || !this.session?.offlineIdentity || this.signedOutLocally)return !this.session?.offlineIdentity;
     if(this.transportBlock())return false;
@@ -238,7 +257,7 @@ export class QuizLabSyncAdapter {
     const client=this.client,run=this.startGeneration,token=this.operationToken();
     this.recovery=(async()=>{
       let result;
-      try{result=await client.auth.getSession();}catch(error){result={error};}
+      try{result=await this.readAuthSession();}catch(error){result={error};}
       if(result.error&&!Number(result.error.status)&&this.lastAuthHttpStatus>=400)result.error.status=this.lastAuthHttpStatus;
       if(run!==this.startGeneration || !this.isOperationCurrent(token))return false;
       if(result.error){
@@ -331,7 +350,7 @@ export class QuizLabSyncAdapter {
     );
     const client=this.client;
     let result;
-    try{result=offlineBoot?{error:Object.assign(new Error('Cloud temporaneamente indisponibile; identità locale conservata'),{status:block.status})}:await client.auth.getSession();}catch(error){result={error};}
+    try{result=offlineBoot?{error:Object.assign(new Error('Cloud temporaneamente indisponibile; identità locale conservata'),{status:block.status})}:await this.readAuthSession();}catch(error){result={error};}
     if(result.error&&!Number(result.error.status)&&this.lastAuthHttpStatus>=400)result.error.status=this.lastAuthHttpStatus;
     if(run!==this.startGeneration || !this.isOperationCurrent(token))throw new Error('Operazione annullata: account cambiato');
     if(result.error){

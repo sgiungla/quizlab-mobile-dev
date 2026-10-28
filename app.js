@@ -31,6 +31,7 @@ let syncInFlight=false;
 let syncQueuedManual=false;
 let lastSyncError=false;
 let explicitAuthIntent=false;
+let authBootPending=true;
 let guestDataPending=false;
 let workspaceGeneration=0;
 let syncRunId=0;
@@ -1054,13 +1055,22 @@ async function startCloud(){
    return data;
   }
  });
- let activationPending=Promise.resolve(),activationAccount;
- function beginActivation(authSession,status){activationAccount=authSession?.user?.id||null;const pending=activate(authSession,status);activationPending=pending.catch(error=>console.warn('Account activation',error));return pending;}
+ let activationPending=Promise.resolve(),activationAccount,activationReady,activationInFlight=false,activationVersion=0;
+ function beginActivation(authSession,status){
+  const version=++activationVersion,id=authSession?.user?.id||null;
+  activationAccount=id;activationReady=undefined;activationInFlight=true;
+  activationPending=activate(authSession,status).then(complete=>{
+   if(complete&&version===activationVersion)activationReady=id;
+  }).catch(error=>console.warn('Account activation',error)).finally(()=>{
+   if(version===activationVersion)activationInFlight=false;
+  });
+  return activationPending;
+ }
  async function activate(authSession,status='cloud-ready'){
   const generation=workspaceGeneration+1;
   await selectWorkspaceForSession(authSession,{explicit:explicitAuthIntent});
   if(generation!==workspaceGeneration||(cloudState.user?.id||null)!==(authSession?.user?.id||null))return;
-  const op=captureOperation();store.sync.mode=status;explicitAuthIntent=false;
+  const op=captureOperation();cloudState.status=status;store.sync.mode=status;explicitAuthIntent=false;
   if(authSession?.user){
    try{await sync.ensurePendingRegistration();requireOperation(op);}catch(e){if(!operationCurrent(op))return;console.warn('Pending registration',e);}
    await globalThis.UniSgiunglaLicense?.refresh({force:false});if(!operationCurrent(op))return;
@@ -1080,17 +1090,26 @@ async function startCloud(){
     await openAdminFromLocation();if(!operationCurrent(op))return;
    }else route.name='access';
   }
-  render();
+  render();return true;
  }
  try{
   await applyDefaultCloudConfig();
   const initial=await sync.start({
    settings:store.settings||{},
    onAuthChange:async({event,session,status})=>{
-    if(event==='TOKEN_REFRESHED'){
-     if((cloudState.user?.id||null)===(session?.user?.id||null)){cloudState.status=status;refreshSyncBadge();return;}
+    const id=session?.user?.id||null;
+    // SDK events can repeat on focus. Share an unfinished activation; once
+    // ready, revalidate the same owner without reselecting/resetting its data.
+    if(event!=='SIGNED_OUT'&&!explicitAuthIntent&&activationAccount===id&&activationInFlight){await activationPending;return;}
+    if(event!=='SIGNED_OUT'&&!explicitAuthIntent&&id&&cloudState.user?.id===id&&activationReady===id){
+     const recovered=cloudState.status==='cloud-offline'&&status!=='cloud-offline',op=captureOperation();
+     cloudState={status,user:session.user};store.sync.mode=status;refreshSyncBadge();
+     await globalThis.UniSgiunglaLicense?.checkAccess();if(!operationCurrent(op))return;
+     if(recovered){await refreshAccessGate({renderBlocked:false});if(!operationCurrent(op))return;cloudSync({silent:true}).catch(error=>console.warn('Cloud recovery',error));}
+     if(!featuresAllowed())render();
+     return;
     }
-    if(event==='INITIAL_SESSION'&&activationAccount===(session?.user?.id||null)){await activationPending;return;}
+    if(event==='INITIAL_SESSION'&&activationAccount===id&&activationReady===id)return;
     await beginActivation(session,status);
    }
   });
@@ -1098,7 +1117,8 @@ async function startCloud(){
   else if(!initial?.user&&cloudState.user)await beginActivation(null,initial.status);
   else if(!initial?.user&&activationAccount===undefined){cloudState=initial;await globalThis.UniSgiunglaLicense?.refresh();}
   await activationPending;
- }catch(e){console.warn('Cloud init',e);lastSyncError=true;render();}
+ }catch(e){console.warn('Cloud init',e);lastSyncError=true;}
+ finally{authBootPending=false;render();}
 }
 
 function accessPage(){
@@ -1430,13 +1450,14 @@ function licensePage(){
  else body+='<p>'+esc(user.email||user.id)+'</p><div class="actions"><button class="btn" data-action="license-refresh">Verifica accesso</button><button class="btn secondary" data-action="sign-out">Esci</button></div>';
  page(body+'</section>','QuizLab','Verifica accesso',false);
 }
-window.addEventListener('unisgiungla-license-change',()=>{if(!featuresAllowed()){session=null;clearTimeout(autoSyncTimer);}render();});
+window.addEventListener('unisgiungla-license-change',()=>{if(!authBootPending&&!featuresAllowed()){session=null;clearTimeout(autoSyncTimer);}render();});
 
 function mountEgress(){
  const host=app.querySelector('[data-egress-host]'),id=cloudState.user?.id;
  if(host&&id&&(accessState.isAdmin||localAdminMonitorAllowed()))globalThis.QuizLabEgress?.mount(host,{accountId:id,isAdmin:true,localOnly:localAdminMonitorAllowed(),currentAccount:()=>cloudState.user?.id,request:async(_,body)=>{const session=await sync.client.auth.getSession(),token=session.data?.session?.access_token;if(!token)throw Error('Cloud non disponibile');const config=globalThis.QUIZLAB_LAB_CONFIG;if(config?.mode!=='production'||config.apiBase!=="https://eqrcdvhhfrkpmnzqoerr.supabase.co")throw Error('Configurazione non valida');const response=await fetch(config.runtimeBase+'/egress',{method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+token,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(10000)});const value=await response.json();if(!response.ok)throw Error(value.message||'Monitor non disponibile');return value;}});
 }
 function render(){
+ if(authBootPending){page('<section class="card hero" role="status" aria-live="polite"><h1>Ripristino accesso…</h1><p class="subtle">Sto verificando il tuo account. I dati salvati restano su questo dispositivo.</p></section>','QuizLab','Ripristino accesso',false);return;}
  Promise.resolve().then(mountEgress).catch(()=>{});
  if(!baseAccessAllowed()){licensePage();return;}
  if(!featuresAllowed()&&!['profile','cloud','admin'].includes(route.name)){licensePage();return;}
