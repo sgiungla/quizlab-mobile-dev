@@ -15,16 +15,16 @@ const categories=['study','progress','service','marketing'];
 const variables=CAMPAIGN_FIELDS.map(f=>f.key);
 const destination=v=>{if(!/^\.\/(?:\?|$)/.test(v||'')||v.length>500||/[<>\r\n#]/.test(v))throw fail(400,'Destinazione non consentita: scegli una funzione QuizLab');const u=new URL(v,'https://quizlab.example/');if([...u.searchParams.keys()].some(k=>!['study','course'].includes(k))||u.searchParams.has('study')&&!['goals','exams','inbox','preferences','review','badges'].includes(u.searchParams.get('study')))throw fail(400,'Funzione QuizLab non valida');return v;};
 export const AUTOMATIONS={
- goal_reminder:{category:'study',enabled:true,title:'Il tuo obiettivo',message:'Riprendi il tuo obiettivo: {obiettivo}.',priority:1,frequencyDays:1,thresholds:[50,75,90,100],dailyLimit:2},
- goal_completed:{category:'progress',enabled:true,title:'Obiettivo raggiunto',message:'Hai completato il tuo obiettivo: {obiettivo}.',priority:2,frequencyDays:1,dailyLimit:2},
- goal_progress:{category:'progress',enabled:true,title:'Un passo avanti',message:'Hai raggiunto una nuova tappa del tuo obiettivo: {obiettivo}.',priority:1,frequencyDays:1,thresholds:[50,75,90,100],dailyLimit:2},
- goal_deadline:{category:'study',enabled:true,title:'La scadenza del tuo obiettivo',message:'Mancano {giorni_obiettivo} giorni alla scadenza di {obiettivo}.',priority:2,frequencyDays:1,intervals:[7,3,1],dailyLimit:2},
- review:{category:'study',enabled:true,title:'Un momento di ripasso',message:'Hai domande da ripassare in {nome_materia}.',priority:1,frequencyDays:1,dailyLimit:2},
- exam:{category:'study',enabled:true,title:'Il tuo prossimo esame',message:'Mancano {giorni_esame} giorni all’esame di {nome_materia}.',priority:2,frequencyDays:1,intervals:[30,14,7,3,1],dailyLimit:2},
- inactivity:{category:'study',enabled:true,title:'Riprendiamo lo studio?',message:'Quando vuoi, puoi riprendere con qualche domanda.',priority:1,frequencyDays:3,dailyLimit:2},
- badge:{category:'progress',enabled:true,title:'Traguardo raggiunto',message:'Hai ottenuto il riconoscimento: {traguardo}.',priority:1,frequencyDays:1,dailyLimit:2},
- bank_assigned:{category:'service',enabled:true,title:'Nuova materia disponibile',message:'È disponibile la materia {nome_materia}.',priority:2,frequencyDays:1,dailyLimit:2},
- bank_update:{category:'service',enabled:true,title:'Materia aggiornata',message:'La banca di {nome_materia} è stata aggiornata.',priority:1,frequencyDays:1,dailyLimit:2}
+ goal_reminder:{category:'study',enabled:true,title:"🎯 La tua prossima conquista",message:"Il tuo obiettivo ti aspetta: «{obiettivo}». Un passo alla volta, con i tuoi tempi. 🌿",priority:1,frequencyDays:1,thresholds:[50,75,90,100],dailyLimit:2},
+ goal_completed:{category:'progress',enabled:true,title:"🎉 Missione compiuta!",message:"Hai completato «{obiettivo}». Un’altra conquista nella tua Sgiungla universitaria!",priority:2,frequencyDays:1,dailyLimit:2},
+ goal_progress:{category:'progress',enabled:true,title:"🌿 La tua preparazione cresce",message:"Nuova tappa raggiunta per «{obiettivo}». Ogni passo conta: avanti così!",priority:1,frequencyDays:1,thresholds:[50,75,90,100],dailyLimit:2},
+ goal_deadline:{category:'study',enabled:true,title:"🧭 Tieni d’occhio la meta",message:"Giorni alla scadenza di «{obiettivo}»: {giorni_obiettivo}. Organizziamo il prossimo passo?",priority:2,frequencyDays:1,intervals:[7,3,1],dailyLimit:2},
+ review:{category:'study',enabled:true,title:"🧠 Facciamo un giro di ripasso?",message:"In {nome_materia} ci sono domande da rivedere. Torniamoci insieme: anche gli errori fanno crescere. 🌱",priority:1,frequencyDays:1,dailyLimit:2},
+ exam:{category:'study',enabled:true,title:"🎓 La meta si avvicina",message:"Giorni all’esame di {nome_materia}: {giorni_esame}. Un po’ di allenamento oggi, un passo avanti nella preparazione.",priority:2,frequencyDays:1,intervals:[30,14,7,3,1],dailyLimit:2},
+ inactivity:{category:'study',enabled:true,title:"🐒 La Sgiungla ti aspetta",message:"Ti va di ripartire con qualche domanda? Ritrovi le tue materie e riprendi con i tuoi tempi.",priority:1,frequencyDays:3,dailyLimit:2},
+ badge:{category:'progress',enabled:true,title:"🏆 Una nuova conquista!",message:"Hai ottenuto «{traguardo}». Questo risultato merita una piccola festa nella Sgiungla! 🎉",priority:1,frequencyDays:1,dailyLimit:2},
+ bank_assigned:{category:'service',enabled:true,title:"📚 Una nuova materia ti aspetta",message:"{nome_materia} è disponibile nel tuo account. Entra nella Sgiungla e scegli da dove iniziare! 🌴",priority:2,frequencyDays:1,dailyLimit:2},
+ bank_update:{category:'service',enabled:true,title:"🌿 Novità tra le tue materie",message:"La banca di {nome_materia} è stata aggiornata. Apri QuizLab per consultare le novità.",priority:1,frequencyDays:1,dailyLimit:2}
 };
 // Service communications and achievements may reach every authorized device
 // while QuizLab is open. Study reminders stay quiet while the account is active.
