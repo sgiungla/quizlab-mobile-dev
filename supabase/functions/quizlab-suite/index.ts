@@ -53,7 +53,7 @@ async function handle(req:Request){
  const m={bytes:0};return metrics.run(m,async()=>{
  let status=200,data:any;
  try{
-  if(route==='health'){return Response.json({version:VERSION,mode:'production',noRealCharge:true,scheduler:'minute',notificationPolicy:4}, {headers:cors(req)});}
+  if(route==='health'){return Response.json({version:VERSION,mode:'production',noRealCharge:true,scheduler:'minute',notificationPolicy:5}, {headers:cors(req)});}
   if(!['GET','POST'].includes(req.method))throw Object.assign(Error('Metodo non consentito'),{status:405});
   const maxBody=route==='gradebook'?524288:65536;
   if(Number(req.headers.get('content-length')||0)>maxBody)throw Object.assign(Error('Richiesta troppo grande'),{status:413});

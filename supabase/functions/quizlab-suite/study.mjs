@@ -23,6 +23,7 @@ export const AUTOMATIONS={
  review:{category:'study',enabled:true,title:"🧠 Facciamo un giro di ripasso?",message:"In {nome_materia} ci sono domande da rivedere. Torniamoci insieme: anche gli errori fanno crescere. 🌱",priority:1,frequencyDays:1,dailyLimit:2},
  exam:{category:'study',enabled:true,title:"🎓 La meta si avvicina",message:"Giorni all’esame di {nome_materia}: {giorni_esame}. Un po’ di allenamento oggi, un passo avanti nella preparazione.",priority:2,frequencyDays:1,intervals:[30,14,7,3,1],dailyLimit:2},
  inactivity:{category:'study',enabled:true,title:"🐒 La Sgiungla ti aspetta",message:"Ti va di ripartire con qualche domanda? Ritrovi le tue materie e riprendi con i tuoi tempi.",priority:1,frequencyDays:3,dailyLimit:2},
+ badge_near:{category:'progress',enabled:true,title:'🌱 Una conquista è vicina',message:'Stai per raggiungere «{traguardo}». Ancora un passo nella tua Sgiungla! 🌿',priority:1,frequencyDays:7,dailyLimit:1,thresholds:[90]},
  badge:{category:'progress',enabled:true,title:"🏆 Una nuova conquista!",message:"Hai ottenuto «{traguardo}». Questo risultato merita una piccola festa nella Sgiungla! 🎉",priority:1,frequencyDays:1,dailyLimit:2},
  bank_assigned:{category:'service',enabled:true,title:"📚 Una nuova materia ti aspetta",message:"{nome_materia} è disponibile nel tuo account. Entra nella Sgiungla e scegli da dove iniziare! 🌴",priority:2,frequencyDays:1,dailyLimit:2},
  bank_update:{category:'service',enabled:true,title:"🌿 Novità tra le tue materie",message:"La banca di {nome_materia} è stata aggiornata. Apri QuizLab per consultare le novità.",priority:1,frequencyDays:1,dailyLimit:2}
@@ -125,7 +126,7 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
     where b.owner_id=$1 and not exists(select 1 from public.quizlab_retired_courses r where r.course_id=b.course_id)
     and not exists(select 1 from public.quizlab_user_deleted_courses d where d.user_id=$1 and d.course_id=b.course_id) order by b.id`,[user])).rows;
   const goalItems=await items(user,'goal');
-  const signature=hash({engine:2,metadata,goals:goalItems.map(i=>[i.item_id,i.revision]),timeZone:preference.settings.timeZone,day:core.localParts(now,preference.settings.timeZone).day});
+  const signature=hash({engine:3,metadata,goals:goalItems.map(i=>[i.item_id,i.revision,i.data.completionEvidence||null]),timeZone:preference.settings.timeZone,day:core.localParts(now,preference.settings.timeZone).day});
   const cached=(await db.query(`select signature,case when $2 then data else jsonb_set(data,'{courses}',coalesce((select jsonb_agg((c-'review'-'pending')||jsonb_build_object('reviewCount',jsonb_array_length(c->'review'),'pendingCount',jsonb_array_length(c->'pending'),'review','[]'::jsonb,'pending','[]'::jsonb)) from jsonb_array_elements(data->'courses') c),'[]'::jsonb)) end as data from quizlab_release_private.suite_study_cache where user_id=$1`,[user,details])).rows[0];
   let data;
   if(cached?.signature===signature&&cached.data.compact&&(!cached.data.nextReviewAt||now<Date.parse(cached.data.nextReviewAt))&&(!interactive||now-Date.parse(cached.data.computedAt)<900000))data=cached.data;
@@ -155,6 +156,25 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
   return data;
  }
  async function items(user,kind){return(await db.query('select item_id,kind,revision,data,updated_at from public.quizlab_study_items where user_id=$1 and not deleted'+(kind?' and kind=$2':'')+' order by updated_at desc',kind?[user,kind]:[user])).rows;}
+ async function goalPresentations(user,all,s,p){
+  const goals=all.filter(i=>i.kind==='goal');if(!goals.length)return [];
+  const proofs=(await db.query("select context,created_at from public.quizlab_notifications where user_id=$1 and context->>'automation'='goal_completed' and context->>'threshold'='100' and context->>'itemId'=any($2::text[]) order by created_at desc",[user,goals.map(i=>i.item_id)])).rows;
+  return goals.map(i=>{
+   const raw=goalValue(i.data,s,clock(),p.timeZone);
+   // Older releases did not store the definition. Accept only the same revision,
+   // or the immediately following automatic exam pause, with a matching period
+   // and a still-valid completed value. Never infer from 100% during a pause alone.
+   const proof=proofs.find(n=>n.context.itemId===i.item_id&&n.context.periodKey===raw.periodKey&&(Number(n.context.revision)===Number(i.revision)||i.data.closedReason==='exam_passed'&&Number(n.context.revision)===Number(i.revision)-1));
+   const recorded=i.data.completionEvidence,recordedValid=recorded?.verified===true&&recorded.definition===core.goalDefinition(i.data)&&recorded.periodKey===raw.periodKey;
+   const evidence=recordedValid?recorded:proof&&raw.valid&&raw.percent===100?{verified:true,definition:core.goalDefinition(i.data),periodKey:raw.periodKey,value:raw.value,target:raw.target,at:new Date(proof.created_at).toISOString()}:null;
+   return {...i,progress:core.preserveCompletion(i.data,raw,evidence)};
+  });
+ }
+ async function journey(user,all,s,p){
+  const badges=(await db.query("select badge_key,label,awarded_at from public.quizlab_study_badges where user_id=$1 and evidence->>'verified'='true' order by awarded_at desc",[user])).rows;
+  const effective=courseNotificationSettings(p,all);
+  const next=core.badgeCandidates(s,badges).find(c=>!c.courseId||studyCourseEnabled(effective,c.courseId))||null;return{badges,next};
+ }
  async function saveItem(user,input){
   await requireStudy(user);uuid(input.item_id);if(!['goal','exam'].includes(input.kind))throw fail(400,'Tipo non valido');
   const data=input.data||{},snap=await snapshot(user,{details:input.data?.metric==='recovery'});
@@ -187,6 +207,7 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
     if(old.data.gradebook.status==='passed')cleaned.cancelled=true;
    }
    if(old?.data?.baseline&&old.data.metric===cleaned.metric&&old.data.courseId===cleaned.courseId){cleaned.baseline=old.data.baseline;if(old.data.baselineEncoding)cleaned.baselineEncoding=old.data.baselineEncoding;else delete cleaned.baselineEncoding;}
+   if(input.kind==='goal'){cleaned.closedReason=cleaned.paused?(old?.data?.closedReason==='exam_passed'?'exam_passed':'manual'):null;if(old&&core.goalDefinition(old.data)===core.goalDefinition(cleaned)){if(old.data.completionEvidence)cleaned.completionEvidence=old.data.completionEvidence;else{const confirmed=(await goalPresentations(user,[old],snap,(await prefs(user)).settings))[0]?.progress;if(confirmed?.completionPreserved)cleaned.completionEvidence={verified:true,definition:core.goalDefinition(cleaned),periodKey:confirmed.periodKey,value:confirmed.value,target:confirmed.target,at:confirmed.completedAt};}}}
    if(cleaned.metric==='recovery'){cleaned.target=cleaned.baseline.length;cleaned.period='custom';}
    if(cleaned.metric==='recovery'&&!cleaned.baseline.length&&!input.deleted)throw fail(400,'Non ci sono errori da recuperare nella materia selezionata');
    const row=(await tx.query('insert into public.quizlab_study_items(item_id,user_id,kind,data,deleted) values($1,$2,$3,$4::jsonb,$5) on conflict(item_id) do update set data=excluded.data,deleted=excluded.deleted,revision=quizlab_study_items.revision+1,updated_at=now() returning *',[input.item_id,user,input.kind,JSON.stringify(cleaned),!!input.deleted])).rows[0];
@@ -223,7 +244,7 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
   const config={...base,enabled:v.enabled,title:validateTemplate(text(v.title,120)),message:validateTemplate(text(v.message,1000)),priority:num(Number(v.priority),0,3),frequencyDays:num(Number(v.frequencyDays),1,30),dailyLimit:num(Number(v.dailyLimit),0,2)};
   if(base.intervals){if(!Array.isArray(v.intervals)||v.intervals.length>10||v.intervals.some(x=>!Number.isInteger(x)||x<1||x>365))throw fail(400,'Intervalli non validi');config.intervals=[...new Set(v.intervals)].sort((a,b)=>b-a);}
   if(base.thresholds){if(!Array.isArray(v.thresholds)||v.thresholds.length>10||v.thresholds.some(x=>!Number.isInteger(x)||x<1||x>100))throw fail(400,'Soglie non valide');config.thresholds=[...new Set(v.thresholds)].sort((a,b)=>a-b);}
-  for(const t of [config.title,config.message])for(const m of t.matchAll(/\{([a-z_]+)\}/g))if(!{goal_reminder:['obiettivo','nome_utente'],goal_progress:['obiettivo','nome_utente'],goal_completed:['obiettivo','nome_utente'],goal_deadline:['obiettivo','nome_utente','giorni_obiettivo'],review:['nome_materia','nome_utente','domande_da_ripassare'],exam:['nome_materia','nome_utente','giorni_esame','percentuale_completamento'],inactivity:['nome_utente','giorni_inattivita'],badge:['traguardo','nome_utente'],bank_update:['nome_materia','nome_utente'],bank_assigned:['nome_materia','nome_utente']}[input.automation_id].includes(m[1]))throw fail(400,'Variabile non disponibile per questa automazione');
+  for(const t of [config.title,config.message])for(const m of t.matchAll(/\{([a-z_]+)\}/g))if(!{goal_reminder:['obiettivo','nome_utente'],goal_progress:['obiettivo','nome_utente'],goal_completed:['obiettivo','nome_utente'],goal_deadline:['obiettivo','nome_utente','giorni_obiettivo'],review:['nome_materia','nome_utente','domande_da_ripassare'],exam:['nome_materia','nome_utente','giorni_esame','percentuale_completamento'],inactivity:['nome_utente','giorni_inattivita'],badge_near:['traguardo','nome_utente'],badge:['traguardo','nome_utente'],bank_update:['nome_materia','nome_utente'],bank_assigned:['nome_materia','nome_utente']}[input.automation_id].includes(m[1]))throw fail(400,'Variabile non disponibile per questa automazione');
   return mutate(user,input,async tx=>{
    const old=(await tx.query('select revision from public.quizlab_notification_automations where automation_id=$1 for update',[input.automation_id])).rows[0];if(Number(old?.revision||0)!==Number(input.expected_revision))throw fail(409,'Automazione cambiata: ricarica');
    const result=(await tx.query('insert into public.quizlab_notification_automations(automation_id,config)values($1,$2::jsonb)on conflict(automation_id)do update set config=excluded.config,revision=quizlab_notification_automations.revision+1,updated_at=now()returning *',[input.automation_id,JSON.stringify(config)])).rows[0];
@@ -237,7 +258,7 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
  }
  async function generationInfo(user){
   return(await db.query(`select md5(jsonb_build_object(
-   'engine',5,
+   'engine',6,
    'assignments',(select count(*) from public.quizlab_assignment_events where user_id=$1 and processed_at is null),
    'review_due',(select coalesce((data->>'nextReviewAt')::timestamptz<=$2,false) from quizlab_release_private.suite_study_cache where user_id=$1),
    'day',to_char($2::timestamptz at time zone coalesce(np.settings->>'timeZone','Europe/Rome'),'YYYY-MM-DD'),
@@ -260,12 +281,15 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
   const name=(await db.query('select display_name from public.quizlab_profiles where user_id=$1',[user])).rows[0]?.display_name||'studente';
   async function auto(id,key,values,context={},urgent=false){const raw=autos.find(a=>a.automation_id===id).config,a=id==='exam'?examTemplate(raw,values):raw;if(!a.enabled)return {handled:true};
    if(context.courseId&&!subjectNoticeEnabled(p,context.courseId))return {handled:true};
-   const merged={nome_utente:name,...values};try{await enqueue(user,{key,category:a.category,title:template(a.title,merged),message:template(a.message,merged),automatic:true,priority:a.priority,context:{automation:id,dailyLimit:a.dailyLimit,frequencyDays:a.frequencyDays,...context},destination:'./?study='+(id==='review'?'review':['bank_update','bank_assigned'].includes(id)?'inbox':id==='exam'?'exams':id==='badge'?'badges':'goals')+(context.courseId?'&course='+encodeURIComponent(context.courseId):'')});return {handled:true};}catch(e){await audit(null,'template_failed',{automation:id,message:e.message});return {handled:false};}}
+   const merged={nome_utente:name,...values};try{await enqueue(user,{key,category:a.category,title:template(a.title,merged),message:template(a.message,merged),automatic:true,priority:a.priority,context:{automation:id,dailyLimit:a.dailyLimit,frequencyDays:a.frequencyDays,...context},destination:'./?study='+(id==='review'?'review':['bank_update','bank_assigned'].includes(id)?'inbox':id==='exam'?'exams':['badge','badge_near'].includes(id)?'badges':'goals')+(context.courseId?'&course='+encodeURIComponent(context.courseId):'')});return {handled:true};}catch(e){await audit(null,'template_failed',{automation:id,message:e.message});return {handled:false};}}
   for(const item of rows){
    if(item.data.courseId&&!studyCourseEnabled(p,item.data.courseId))continue;
    if(item.kind==='goal'){
     if(!rights.study)continue;
-    const g=goalValue(item.data,s,clock(),p.timeZone),ctx={itemId:item.item_id,revision:item.revision,periodKey:g.periodKey,...(item.data.courseId?{courseId:item.data.courseId}:{})};
+    if(item.data.paused)continue;
+    const g=goalValue(item.data,s,clock(),p.timeZone);
+    if(s.fresh&&g.status==='achieved'&&!g.completionPreserved){const evidence={verified:true,definition:core.goalDefinition(item.data),periodKey:g.periodKey,value:g.value,target:g.target,at:clock().toISOString()};const changed=(await db.query("update public.quizlab_study_items set data=jsonb_set(data,'{completionEvidence}',$4::jsonb) where user_id=$1 and item_id=$2 and revision=$3 returning revision",[user,item.item_id,item.revision,JSON.stringify(evidence)])).rows[0];if(!changed)continue;item.revision=changed.revision;}
+    const ctx={itemId:item.item_id,revision:item.revision,periodKey:g.periodKey,...(item.data.courseId?{courseId:item.data.courseId}:{})};
     if(g.status==='active')await auto('goal_reminder','goal-reminder:'+item.item_id+':'+g.periodKey+':'+Math.floor(core.dayNumber(s.today)/autos.find(a=>a.automation_id==='goal_reminder').config.frequencyDays),{obiettivo:item.data.title},ctx);
     if(g.status==='active'&&item.data.deadline){const days=core.dayNumber(item.data.deadline)-core.dayNumber(s.today);if(autos.find(a=>a.automation_id==='goal_deadline').config.intervals.includes(days))await auto('goal_deadline','goal-deadline:'+item.item_id+':'+item.revision+':'+days,{obiettivo:item.data.title,giorni_obiettivo:days},{...ctx,deadlineDays:days});}
     if(s.fresh&&g.valid&&g.status==='achieved'){
@@ -285,6 +309,9 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
   const all=s.courses.reduce((n,c)=>n+c.unique,0),badges=[];for(const threshold of [100,500,1000])if(all>=threshold)badges.push(['unique:'+threshold,threshold+' domande diverse affrontate']);if(s.streak>=7)badges.push(['streak:7','7 giorni consecutivi']);
   for(const c of s.courses){if(c.total&&c.unique===c.total)badges.push(['bank:'+c.courseId,'Banca completata: '+c.subject]);for(const t of [80,90])if(c.attemptCount>=100&&c.accuracy>=t)badges.push(['accuracy:'+c.courseId+':'+t,'Accuratezza '+t+'%: '+c.subject]);if(c.avg5!=null&&c.examCount>=5&&c.avg5>=27)badges.push(['exam:'+c.courseId+':27','Media almeno 27/30: '+c.subject]);if(c.averageImprovement!=null&&c.averageImprovement>=3)badges.push(['exam-improvement:'+c.courseId+':3','Media migliorata di almeno 3 punti: '+c.subject]);if(c.recoveredAll)badges.push(['recovery:'+c.courseId,'Errori recuperati: '+c.subject]);}
   if(s.fresh)for(const [key,label]of badges){const result=await db.query("insert into public.quizlab_study_badges(user_id,badge_key,label,evidence)values($1,$2,$3,$4::jsonb)on conflict(user_id,badge_key)do update set evidence=excluded.evidence where quizlab_study_badges.evidence->>'verified' is distinct from 'true' returning badge_key",[user,key,label,JSON.stringify({consolidatedAt:s.consolidatedAt,verified:true})]);const course=s.courses.find(c=>['bank:','accuracy:','exam:','exam-improvement:','recovery:'].some(prefix=>key.startsWith(prefix+c.courseId)&&(!key.slice((prefix+c.courseId).length)||key.slice((prefix+c.courseId).length).startsWith(':'))));if(result.rows.length)await auto('badge','badge:'+key,{traguardo:label},{badge:key,...(course?{courseId:course.courseId}:{})});}
+  if(rights.study&&s.fresh&&s.courses.some(c=>studyCourseEnabled(p,c.courseId))){const j=await journey(user,rows,s,p),candidate=j.next,a=autos.find(a=>a.automation_id==='badge_near').config;
+   if(candidate&&candidate.percent>=Math.min(...a.thresholds)&&!core.goalOverlapsBadge(candidate,rows.filter(i=>i.kind==='goal'&&goalValue(i.data,s,clock(),p.timeZone).status==='active')))await auto('badge_near','badge-near:'+candidate.key,{traguardo:candidate.label},{nearBadge:candidate.key,...(candidate.courseId?{courseId:candidate.courseId}:{})});
+  }
   const assigned=rights.study?(await db.query('select e.bank_id,e.course_id,e.revision,b.subject from public.quizlab_assignment_events e join public.quizlab_banks b on b.id=e.bank_id and b.owner_id=e.user_id where e.user_id=$1 and e.processed_at is null order by e.created_at limit 50',[user])).rows:[];
   for(const e of assigned){const outcome=await auto('bank_assigned','assigned:'+e.bank_id,{nome_materia:e.subject},{courseId:e.course_id,bankId:e.bank_id});if(outcome?.handled)await db.query('update public.quizlab_assignment_events set processed_at=$2 where bank_id=$1 and processed_at is null',[e.bank_id,clock()]);}
   const revisions=rights.study?(await db.query('select course_id,bank_revision,subject from public.quizlab_banks where owner_id=$1',[user])).rows:[],previous=rights.study?(await db.query('select data from quizlab_release_private.suite_bank_revisions where user_id=$1',[user])).rows[0]?.data:null;
@@ -305,10 +332,11 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
   if(c.badge&&!(await db.query("select 1 from public.quizlab_study_badges where user_id=$1 and badge_key=$2 and evidence->>\'verified\'=\'true\'",[n.user_id,c.badge])).rows.length)return null;
   if(c.courseId&&!c.gradebookExam&&!s.courses.some(x=>x.courseId===c.courseId))return false;
   if(c.courseId&&!subjectNoticeEnabled(effective,c.courseId))return false;
+  if(c.nearBadge){if(!s.fresh)return null;const all=await items(n.user_id);if(!s.courses.some(course=>studyCourseEnabled(courseNotificationSettings(p,all),course.courseId)))return false;const j=await journey(n.user_id,all,s,p),candidate=j.next,a=(await automationRows()).find(a=>a.automation_id==='badge_near').config;if(!candidate||candidate.key!==c.nearBadge||candidate.percent<Math.min(...a.thresholds)||core.goalOverlapsBadge(candidate,all.filter(i=>i.kind==='goal'&&goalValue(i.data,s,clock(),p.timeZone).status==='active')))return false;}
   if(c.itemId){const item=allItems.find(i=>i.item_id===c.itemId);if(!item||Number(item.revision)!==Number(c.revision))return false;
    if(item.data.courseId&&(!c.gradebookExam&&!s.courses.some(x=>x.courseId===item.data.courseId)||!studyCourseEnabled(effective,item.data.courseId)))return false;
    if(item.kind==='exam'){if(item.data.cancelled||!p.countdowns||core.examDays(item.data,clock(),p.timeZone)!==c.days)return false;}
-   else{const g=goalValue(item.data,s,clock(),p.timeZone);if(g.periodKey!==c.periodKey||['paused','expired','scheduled'].includes(g.status)||['goal_reminder','goal_deadline'].includes(c.automation)&&g.status==='achieved'||c.threshold&&(!g.valid||g.percent<c.threshold))return false;
+   else{if(item.data.paused)return false;const g=goalValue(item.data,s,clock(),p.timeZone);if(g.periodKey!==c.periodKey||['paused','expired','scheduled'].includes(g.status)||['goal_reminder','goal_deadline'].includes(c.automation)&&g.status==='achieved'||c.threshold&&(!g.valid||g.percent<c.threshold))return false;
     if(c.automation==='goal_deadline'&&(!item.data.deadline||core.dayNumber(item.data.deadline)-core.dayNumber(s.today)!==c.deadlineDays))return false;
     if(c.automation==='goal_completed'&&g.status!=='achieved')return false;
     if(c.automation==='goal_progress'){const a=(await automationRows()).find(a=>a.automation_id===c.automation).config;if(Math.max(...a.thresholds.filter(t=>t<=g.percent),0)!==c.threshold)return false;}}}
@@ -328,6 +356,7 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
    if(c){values.nome_materia=c.subject;if(s.fresh){values.percentuale_completamento=Math.round(c.coverage);values.domande_da_ripassare=reviewCount(c);}}
    if(s.fresh&&s.lastStudyAt)values.giorni_inattivita=core.dayNumber(s.today)-core.dayNumber(core.localParts(new Date(s.lastStudyAt),p.timeZone).day);
    if(context.badge)values.traguardo=(await db.query('select label from public.quizlab_study_badges where user_id=$1 and badge_key=$2',[n.user_id,context.badge])).rows[0]?.label;
+   if(context.nearBadge){const j=await journey(n.user_id,await items(n.user_id),s,p);if(j.next?.key!==context.nearBadge)return false;values.traguardo=j.next.label;}
    const rendered=context.automation==='exam'?examTemplate(a,values):a;
    try{n.title=template(rendered.title,values);n.message=template(rendered.message,values);}catch{return false;}
    n.context={...context,dailyLimit:a.dailyLimit,frequencyDays:a.frequencyDays};n.priority=a.priority;
@@ -436,7 +465,7 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
   const outcome=delivery?.status||(!allowRealPush&&!sendPush?'disabled':!core.deliveryWindow(current,clock(),{automatic:false})?'quiet_hours':'not_sent');
   return{notification_id:id,realPushEnabled:allowRealPush,quietHoursRespected:true,outcome,failure:delivery?.failure||null,providerStatus:delivery?.provider_status||null};
  }
- async function dashboard(user){await requireStudy(user);const p=await prefs(user),s=await snapshot(user,{details:true,interactive:true}),list=await items(user);return{preferences:p,courses:s.courses.map(c=>({courseId:c.courseId,subject:c.subject,total:c.total,unique:c.unique,attemptCount:c.attemptCount,correct:c.correct,coverage:c.coverage,pending:pendingCount(c),avg5:c.avg5,reviewCount:reviewCount(c),review:c.review.slice(0,500)})),goals:list.filter(i=>i.kind==='goal').map(i=>({...i,progress:goalValue(i.data,s,clock(),p.settings.timeZone)})),exams:list.filter(i=>i.kind==='exam').map(i=>({...i,days:core.examDays(i.data,clock(),p.settings.timeZone)})),badges:(await db.query('select badge_key,label,awarded_at from public.quizlab_study_badges where user_id=$1 and evidence->>\'verified\'=\'true\' order by awarded_at desc',[user])).rows,streak:s.streak,lastStudyAt:s.lastStudyAt,consolidatedAt:s.consolidatedAt,fresh:s.fresh,syncStatus:s.syncStatus};}
+ async function dashboard(user){await requireStudy(user);const p=await prefs(user),s=await snapshot(user,{details:true,interactive:true}),list=await items(user),goals=await goalPresentations(user,list,s,p.settings),j=await journey(user,list,s,p.settings);return{preferences:p,courses:s.courses.map(c=>({courseId:c.courseId,subject:c.subject,total:c.total,unique:c.unique,attemptCount:c.attemptCount,correct:c.correct,coverage:c.coverage,pending:pendingCount(c),avg5:c.avg5,reviewCount:reviewCount(c),review:c.review.slice(0,500)})),goals,exams:list.filter(i=>i.kind==='exam').map(i=>({...i,days:core.examDays(i.data,clock(),p.settings.timeZone)})),badges:j.badges,nextBadge:j.next,streak:s.streak,lastStudyAt:s.lastStudyAt,consolidatedAt:s.consolidatedAt,fresh:s.fresh,syncStatus:s.syncStatus};}
  async function campaignData(raw){
   const d={title:validateTemplate(text(raw.title,120)),message:validateTemplate(text(raw.message,1000)),category:raw.category,destination:destination(raw.destination||'./?study=inbox'),essential:!!raw.essential,filters:raw.filters||{},icon:'./icons/quizlab-sgiungla-192.png',scheduledAt:raw.scheduledAt||null,expiresAt:raw.expiresAt||new Date(clock().getTime()+7*86400000).toISOString(),references:{}};
   const refs=raw.references||{};
@@ -549,10 +578,10 @@ export function createStudyModule({lab,vapid,allowRealPush=false,sendPush,clock=
  }
  async function summary(user){
   const preference=await prefs(user),a=await access(user),notifications=await unreadCount(user,!!a.study,!!a.gradebook);let overview=null;
-  if(a.study){const s=await snapshot(user),all=await items(user),goals=all.filter(i=>i.kind==='goal').map(i=>({title:i.data.title,...goalValue(i.data,s,clock(),preference.settings.timeZone)}));
+  if(a.study){const s=await snapshot(user),all=await items(user),goals=(await goalPresentations(user,all,s,preference.settings)).map(i=>i.progress),j=await journey(user,all,s,preference.settings);
    const exams=all.filter(i=>i.kind==='exam'&&!i.data.cancelled&&core.examDays(i.data,clock(),preference.settings.timeZone)>=0).sort((x,y)=>x.data.date.localeCompare(y.data.date)||String(x.data.time||'').localeCompare(String(y.data.time||'')));
    const e=exams[0],c=e?s.courses.find(c=>c.courseId===e.data.courseId):null;
-   overview={streak:s.streak,activeGoals:goals.filter(g=>g.status==='active').length,achievedGoals:goals.filter(g=>g.status==='achieved').length,consolidatedAt:s.consolidatedAt,
+   overview={badges:j.badges.slice(0,3),badgeCount:j.badges.length,nextBadge:j.next,streak:s.streak,activeGoals:goals.filter(g=>g.status==='active').length,achievedGoals:goals.filter(g=>g.status==='achieved').length,consolidatedAt:s.consolidatedAt,
     nextExam:e&&c?{...e.data,subject:c.subject,days:core.examDays(e.data,clock(),preference.settings.timeZone),coverage:c.coverage}:null};
   }return{preferences:preference,unread:notifications.unread,overview};
  }
