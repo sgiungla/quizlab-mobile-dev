@@ -1,2 +1,78 @@
-<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#052e16"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><title>QuizLab · Sgiungla</title><link rel="manifest" href="./manifest.webmanifest"><link rel="icon" type="image/png" sizes="192x192" href="./icons/quizlab-sgiungla-192.png"><link rel="apple-touch-icon" sizes="192x192" href="./icons/quizlab-sgiungla-192.png"><link rel="stylesheet" href="./styles.css"><link rel="stylesheet" href="./study.css"><link rel="stylesheet" href="./gradebook.css"><link rel="stylesheet" href="./admin-user-list.css"></head><body><div id="app"></div><input id="filePicker" type="file" accept=".json,application/json" hidden><script src="./vendor/supabase.js"></script><script src="./lab-config.js"></script><script src="./lab-license.js"></script><script type="module" src="./app.js"></script></body></html>
+<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#052e16"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><title>QuizLab · Sgiungla</title><link rel="manifest" href="./manifest.webmanifest"><link rel="icon" type="image/png" sizes="192x192" href="./icons/quizlab-sgiungla-192.png"><link rel="apple-touch-icon" sizes="192x192" href="./icons/quizlab-sgiungla-192.png"><link rel="stylesheet" href="./styles.css"><link rel="stylesheet" href="./study.css"><link rel="stylesheet" href="./gradebook.css"><link rel="stylesheet" href="./admin-user-list.css"></head><body><div id="app"></div><input id="filePicker" type="file" accept=".json,application/json" hidden><script src="./vendor/supabase.js"></script><script src="./lab-config.js"></script><script src="./lab-license.js"></script><script type="module" src="./app.js"></script><button id="quizlab-setup-open" type="button" style="position:fixed;right:1rem;bottom:calc(1rem + env(safe-area-inset-bottom));z-index:8;background:#052e16;color:#fff;border:1px solid #4ade80;border-radius:1rem;padding:.65rem .85rem">Installa e ricevi avvisi</button>
+<dialog id="quizlab-setup" aria-labelledby="quizlab-setup-title" style="box-sizing:border-box;width:min(28rem,calc(100% - 2rem));background:#052e16;color:#fff;border:1px solid #4ade80;border-radius:1rem;padding:1.2rem">
+  <h2 id="quizlab-setup-title">Porta QuizLab con te</h2>
+  <p>Installa QuizLab per aprirlo dalla schermata Home o dal desktop. Attiva le notifiche per ricevere promemoria e aggiornamenti.</p>
+  <p><button id="quizlab-install" type="button">Installa QuizLab</button></p>
+  <p><button id="quizlab-notifications" type="button">Configura notifiche</button></p>
+  <p id="quizlab-setup-status" role="status"></p>
+  <form method="dialog"><button autofocus>Più tardi</button></form>
+</dialog>
+<script>
+(() => {
+  const dialog = document.getElementById('quizlab-setup');
+  const open = document.getElementById('quizlab-setup-open');
+  const install = document.getElementById('quizlab-install');
+  const status = document.getElementById('quizlab-setup-status');
+  const key = 'quizlab-setup-seen-v1';
+  let installPrompt;
+  const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const show = () => {
+    install.hidden = standalone();
+    if (!dialog.open) dialog.showModal();
+  };
+  if (typeof dialog.showModal !== 'function') {
+    open.hidden = true;
+    return;
+  }
+  open.addEventListener('click', show);
+  dialog.addEventListener('close', () => {
+    try { localStorage.setItem(key, '1'); } catch {}
+  });
+  window.addEventListener('beforeinstallprompt', event => {
+    event.preventDefault();
+    installPrompt = event;
+  });
+  window.addEventListener('appinstalled', () => {
+    installPrompt = null;
+    install.hidden = true;
+    status.textContent = 'QuizLab è installato.';
+  });
+  install.addEventListener('click', async () => {
+    if (installPrompt) {
+      const prompt = installPrompt;
+      installPrompt = null;
+      try {
+        await prompt.prompt();
+        if ((await prompt.userChoice).outcome === 'accepted') return;
+      } catch {}
+    }
+    const apple = /iPhone|iPad|iPod/.test(navigator.userAgent)
+      || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    status.textContent = apple
+      ? 'In Safari, tocca Condividi e scegli Aggiungi alla schermata Home. Apri QuizLab dalla nuova icona per attivare le notifiche.'
+      : 'Apri il menu del browser e cerca Installa app o Aggiungi alla schermata Home. Se la voce manca, prova con Chrome o Edge.';
+  });
+  document.getElementById('quizlab-notifications').addEventListener('click', () => {
+    const inbox = document.querySelector('#app [data-study-tab="inbox"]');
+    if (!inbox) {
+      status.textContent = 'Accedi al tuo account QuizLab, poi riapri questo invito per attivare le notifiche.';
+      return;
+    }
+    const button = document.createElement('button');
+    button.hidden = true;
+    button.dataset.action = 'study-panel';
+    button.dataset.studyTab = 'preferences';
+    document.getElementById('app').append(button);
+    dialog.close();
+    button.click();
+    button.remove();
+  });
+  window.addEventListener('load', () => {
+    let seen = false;
+    try { seen = localStorage.getItem(key) === '1'; } catch {}
+    if (!seen && !standalone()) show();
+  }, {once: true});
+})();
+</script>
+</body></html>
 
