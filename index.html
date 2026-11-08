@@ -3,7 +3,7 @@
   <h2 id="quizlab-setup-title">Porta QuizLab con te</h2>
   <p>Installa QuizLab per aprirlo dalla schermata Home o dal desktop. Attiva le notifiche per ricevere promemoria e aggiornamenti.</p>
   <p><button id="quizlab-install" type="button">Installa QuizLab</button></p>
-  <p><button id="quizlab-notifications" type="button">Configura notifiche</button></p>
+  <p><button id="quizlab-notifications" type="button">Attiva notifiche</button></p>
   <p id="quizlab-setup-status" role="status"></p>
   <form method="dialog"><button autofocus>Più tardi</button></form>
 </dialog>
@@ -16,6 +16,20 @@
   const key = 'quizlab-setup-seen-v1';
   let installPrompt;
   const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const app = document.getElementById('app');
+  const appleDevice = /iPhone|iPad|iPod/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const notificationKey = 'quizlab-notification-invite-seen-v1';
+  let offered = false;
+  const signedIn = () => !!app.querySelector('[data-study-tab="inbox"]');
+  const offerNotifications = () => {
+    if (offered || !signedIn() || (appleDevice && !standalone())
+        || typeof Notification === 'undefined' || Notification.permission !== 'default') return;
+    try { if (localStorage.getItem(notificationKey)) return; } catch {}
+    offered = true;
+    status.textContent = 'Premi «Attiva notifiche», poi «Attiva notifiche su questo dispositivo» e scegli «Consenti» nel browser.';
+    show();
+  };
   const show = () => {
     install.hidden = standalone();
     if (!dialog.open) dialog.showModal();
@@ -26,7 +40,10 @@
   }
   open.addEventListener('click', show);
   dialog.addEventListener('close', () => {
-    try { localStorage.setItem(key, '1'); } catch {}
+    try {
+      localStorage.setItem(key, '1');
+      if (offered) localStorage.setItem(notificationKey, '1');
+    } catch {}
   });
   window.addEventListener('beforeinstallprompt', event => {
     event.preventDefault();
@@ -53,9 +70,13 @@
       : 'Apri il menu del browser e cerca Installa app o Aggiungi alla schermata Home. Se la voce manca, prova con Chrome o Edge.';
   });
   document.getElementById('quizlab-notifications').addEventListener('click', () => {
-    const inbox = document.querySelector('#app [data-study-tab="inbox"]');
-    if (!inbox) {
-      status.textContent = 'Accedi al tuo account QuizLab, poi riapri questo invito per attivare le notifiche.';
+    if (appleDevice && !standalone()) {
+      status.textContent = 'Da Safari, aggiungi QuizLab alla schermata Home. Aprilo dalla nuova icona e accedi per attivare le notifiche.';
+      return;
+    }
+    if (!signedIn()) {
+      dialog.close();
+      app.querySelector('input[type="email"]')?.focus();
       return;
     }
     const button = document.createElement('button');
@@ -71,6 +92,8 @@
     let seen = false;
     try { seen = localStorage.getItem(key) === '1'; } catch {}
     if (!seen && !standalone()) show();
+    new MutationObserver(offerNotifications).observe(app, {childList: true, subtree: true});
+    offerNotifications();
   }, {once: true});
 })();
 </script>
