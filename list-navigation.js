@@ -2,11 +2,12 @@
  'use strict';
  const states=new Map(),escape=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const fold=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('it');
- function mount(host,{key,rows,renderItem,text=()=>'',label='elementi',pageSize=12,empty='Nessun elemento disponibile.',searchable=true}){
+ function mount(host,{key,rows,renderItem,text=()=>'',label='elementi',pageSize=12,empty='Nessun elemento disponibile.',searchable=true,orderKey=null}){
   if(!host)return;
   if(!Number.isInteger(pageSize)||pageSize<1)throw Error('Dimensione pagina non valida');
   if(!states.has(key)){if(states.size>=100)states.delete(states.keys().next().value);states.set(key,{page:0,query:''});}
-  const state=states.get(key),doc=host.ownerDocument,showSearch=searchable&&(rows.length>pageSize||!!state.query);
+  const state=states.get(key);if(orderKey!==null&&state.orderKey!==orderKey){state.page=0;state.orderKey=orderKey;}
+  const doc=host.ownerDocument,showSearch=searchable&&(rows.length>pageSize||!!state.query);
   host.classList.add('ql-list-navigation');
   const originalClass=host.dataset.listItemsClass||host.className.replace('ql-list-navigation','').trim();host.dataset.listItemsClass=originalClass;
   host.className='ql-list-navigation';

@@ -9,6 +9,8 @@ import {DEFAULT_CLOUD_CONFIG} from './cloud-config.js';
 import './study-core.js';
 import './list-navigation.js';
 import './study-ui.js';
+import './course-recency.js';
+import {installSetupGuide} from './setup-guide.js';
 import {syncPushEvidence} from './push-evidence.js';
 import {collectPushDiagnostics} from './push-diagnostics.js';
 import {createAdminUserListState,adminUserPageRequest,applyAdminUserPage,readAdminUserFilters,updateAdminUserFilters,resetAdminUserFilters,renderAdminUserList,adminEffectiveStatus} from './admin-user-list.js';
@@ -59,7 +61,18 @@ let syncRunId=0;
 let localCourseSaveSerial=0;
 let searchLimit=30;
 let studyTelemetryAt=0,studyTelemetryClean=null,studyTelemetryActive=null;
-let studyOverview=null,studyBackgroundBusy=false,studyOverviewUser=null;
+let studyOverview=null,studyBackgroundBusy=false,studyOverviewUser=null,studyPreferences=null;
+const setupGuide=installSetupGuide({
+ getState:()=>({ready:!authBootPending,accountId:cloudState.user?.id||null,deviceId:store.sync?.clientId,preferences:studyOverviewUser===cloudState.user?.id?studyPreferences:null}),
+ request:studyRequest,
+ openPreferences:()=>openStudyPanel('preferences')
+});
+globalThis.addEventListener('quizlab-push-state',event=>{
+ const value=event.detail;
+ if(value?.accountId!==cloudState.user?.id||value?.deviceId!==store.sync?.clientId)return;
+ studyPreferences=value.settings;studyOverviewUser=value.accountId;
+ setupGuide.update({force:true,pushState:value});
+});
 async function studyRequest(path,body){
  const userId=cloudState.user?.id;if(!userId||!sync.client)throw new Error('Accedi al tuo account UniSgiunglaLab');
  const result=await sync.client.auth.getSession(),token=result.data?.session?.access_token;
@@ -92,7 +105,7 @@ async function studyRefreshBackground(){
  if(globalThis.QUIZLAB_LAB_CONFIG?.studyEnabled===false)return;
  if(studyBackgroundBusy||!cloudState.user||!navigator.onLine)return;studyBackgroundBusy=true;
  try{await studyHeartbeat();const id=cloudState.user.id,value=await studyRequest('summary');if(cloudState.user?.id!==id)return;
-  studyOverview=value.overview;studyOverviewUser=id;
+  studyOverview=value.overview;studyOverviewUser=id;studyPreferences=value.preferences?.settings||null;setupGuide.update();
   for(const el of document.querySelectorAll('[data-study-unread]'))el.textContent=value.unread?'('+value.unread+')':'';
   for(const el of document.querySelectorAll('[data-study-summary]'))el.innerHTML=studySummaryHtml();
   await syncPushEvidence(id,studyRequest,value.preferences);
@@ -388,11 +401,25 @@ function bottomNavHtml(){
  const item=(action,label,icon,names)=>'<button data-action="'+action+'" class="'+(names.includes(active)?'active':'')+'"><span>'+icon+'</span><small>'+label+'</small></button>';
  return '<nav class="mobile-bottom-nav">'+item('home','Home','⌂',['home'])+(gradebookAllowed()?item('gradebook','Libretto','📗',[]):'')+item('profile','Profilo','◉',['profile'])+item('cloud','Cloud','☁',['cloud','access'])+(accessState.isAdmin?item('open-admin','Admin','🛡',['admin']):'')+'</nav>';
 }
-function page(body,title='QuizLab · Sgiungla',sub='Mobile · offline-first',back=false){app.innerHTML='<div class="app-frame">'+top(title,sub,back)+'<main class="main">'+(!authBootPending&&route.name==='home'&&gradebookAllowed()?'<div data-gradebook-widget></div>':'')+((route.name==='home'||route.name==='dashboard')&&featuresAllowed()?'<div data-study-summary>'+studySummaryHtml()+'</div>':'')+body+'</main>'+bottomNavHtml()+'</div>';if(route.name==='home'){const hero=app.querySelector('.mobile-home-hero');if(hero){const gb=app.querySelector('[data-gradebook-widget]'),summary=app.querySelector('[data-study-summary]');if(summary)hero.after(summary);if(gb)hero.after(gb);}}Promise.resolve().then(mountGradebook).catch(()=>{});}
-function setRoute(name,courseId=route.courseId){if(name==='admin'&&!localAdminMonitorAllowed()){location.assign('./admin.html');return;}if(examTimer){clearInterval(examTimer);examTimer=null;}route={name,courseId};session=null;render();}
+let renderedPageKey=null;
+function page(body,title='QuizLab · Sgiungla',sub='Mobile · offline-first',back=false){
+ const pageKey=[route.name,route.courseId,route.name==='session'?session?.index:''].join('|');
+ const navigating=pageKey!==renderedPageKey;
+ renderedPageKey=pageKey;
+ app.innerHTML='<div class="app-frame">'+top(title,sub,back)+'<main class="main">'+(!authBootPending&&route.name==='home'&&gradebookAllowed()?'<div data-gradebook-widget></div>':'')+(route.name==='home'&&featuresAllowed()?'<div data-study-summary>'+studySummaryHtml()+'</div>':'')+body+'</main>'+bottomNavHtml()+'</div>';
+ if(route.name==='home'){
+  const hero=app.querySelector('.mobile-home-hero');
+  if(hero){const gb=app.querySelector('[data-gradebook-widget]'),summary=app.querySelector('[data-study-summary]');if(summary)hero.after(summary);if(gb)hero.after(gb);}
+ }
+ if(navigating)window.scrollTo({top:0,left:0,behavior:'instant'});
+ setupGuide.update();
+ Promise.resolve().then(mountGradebook).catch(()=>{});
+}
+
+function setRoute(name,courseId=route.courseId){if(name==='admin'&&!localAdminMonitorAllowed()){location.assign('./admin.html');return;}if(examTimer){clearInterval(examTimer);examTimer=null;}if(name==='dashboard'&&store.courses[courseId])globalThis.QuizLabCourseRecency.touch(currentWorkspaceKey(),courseId);route={name,courseId};session=null;render();}
 
 function home(){
- const rows=Object.entries(store.courses||{}).map(([id,c])=>[id,shape(c)]).filter(([,c])=>qbank(c).length||c.attempts.length).sort((a,b)=>a[1].subject.localeCompare(b[1].subject));
+ const rows=Object.entries(store.courses||{}).map(([id,c])=>[id,shape(c)]).filter(([,c])=>qbank(c).length||c.attempts.length).map(([id,c])=>[id,c,globalThis.QuizLabCourseRecency.activityAt(currentWorkspaceKey(),id,c)]).sort((a,b)=>b[2]-a[2]||a[1].subject.localeCompare(b[1].subject));
  const p=store.profile||{};
  const configured=sync.configured(store.settings||{})||sync.configured(DEFAULT_CLOUD_CONFIG||{});
  let html='<div class="stack"><section class="card hero jungle-hero mobile-home-hero"><div class="mobile-brand-row"><img src="./icons/quizlab-sgiungla-192.png" class="mobile-hero-mark" alt="QuizLab Sgiungla"><div><div class="eyebrow">QuizLab · Sgiungla Edition</div><h1>'+(p.displayName?'Ciao, '+esc(p.displayName.split(' ')[0])+' 👋':'Benvenuto nella Sgiungla 🌴')+'</h1><p class="jungle-line">'+esc(p.motto||'La giungla universitaria è sotto controllo.')+'</p></div>'+avatarHtml('large')+'</div><div class="hero-pills"><span>🌿 Multi-materia</span><span>☁️ Cloud</span><span>🧠 AI + spiegazioni</span></div><div class="actions hero-actions"><button class="btn" data-action="import">📥 Importa</button><button class="btn secondary" data-action="backup" '+(rows.length?'':'disabled')+'>💾 Backup</button><button class="btn ghost" data-action="profile">👤 Profilo</button></div></section>';
@@ -408,7 +435,7 @@ function home(){
  html+='<div data-home-courses></div>';
  html+=cloudNoticeHtml()+'<section class="card"><h3 class="section-title">Sincronizzazione</h3><p class="subtle">'+(cloudState.user?'Cloud collegato · sincronizzazione automatica attiva. I progressi restano disponibili anche offline entro la verifica di accesso.':'Puoi continuare a usare QuizLab in locale oppure accedere qui sopra per attivare la sincronizzazione cloud.')+'</p></section></div>';
  page(html);
- globalThis.QuizLabListNavigation.mount(app.querySelector('[data-home-courses]'),{key:currentWorkspaceKey()+':home-courses',rows,renderItem:courseCard,text:([id,c])=>c.subject||id,label:'materie'});
+ globalThis.QuizLabListNavigation.mount(app.querySelector('[data-home-courses]'),{key:currentWorkspaceKey()+':home-courses',rows,orderKey:rows.map(([id])=>id).join('|'),renderItem:courseCard,text:([id,c])=>c.subject||id,label:'materie'});
 }
 
 function dashboard(){
@@ -428,7 +455,7 @@ function dashboard(){
 function training(presetChapter=null){
  const c=course(),all=qbank(c),chs=uniq(all.map(q=>Number(q.chapter)).filter(Boolean)).sort((a,b)=>a-b),first=presetChapter||chs[0],last=chs.at(-1),remain=Math.max(0,all.length-new Set(c.fullCampaign?.seenIds||[]).size),chapterCount=new Map(chs.map(ch=>[ch,all.filter(q=>Number(q.chapter)===ch).length]));
  const sourceOpts='<option value="mixed">Miste</option><option value="official">Solo ufficiali</option><option value="ai">Solo AI</option>';
- page('<div class="stack"><section class="card training-overview"><div><div class="eyebrow">Banca disponibile</div><h2 class="section-title">'+all.length+' domande</h2></div><div class="pill-row"><span class="pill off">'+c.officialBank.length+' ufficiali</span><span class="pill ai">'+c.aiBank.length+' AI</span></div></section><section class="card"><h2 class="section-title">🎓 Simulazione esame</h2><p class="subtle">31 domande · 30 minuti · nessuna correzione durante la prova. Le prime 30 determinano il voto; la 31ª vale solo per la lode.</p><button class="btn" data-action="start-exam" '+(qbank(c).length<31?'disabled':'')+'>Avvia simulazione</button></section><section class="card"><h2 class="section-title">📚 Allenamento per capitolo</h2><div class="row"><label>Capitolo<select id="chapterSelect">'+chs.map(ch=>'<option value="'+ch+'" '+(ch===first?'selected':'')+'>Capitolo '+ch+' · '+chapterCount.get(ch)+' domande</option>').join('')+'</select></label><label>Tipo<select id="chapterSource">'+sourceOpts+'</select></label></div><label>Domande<select id="chapterAmount"><option>10</option><option>20</option><option value="all">Tutte</option></select></label><button class="btn secondary" data-action="start-chapter">Avvia capitolo</button></section><section class="card"><h2 class="section-title">📖 Intervallo di programma</h2><div class="row"><label>Da<select id="rangeFrom">'+chs.map(ch=>'<option value="'+ch+'">'+ch+'</option>').join('')+'</select></label><label>A<select id="rangeTo">'+chs.map(ch=>'<option value="'+ch+'" '+(ch===last?'selected':'')+'>'+ch+'</option>').join('')+'</select></label></div><label>Tipo<select id="rangeSource">'+sourceOpts+'</select></label><label>Domande<select id="rangeAmount"><option>10</option><option>20</option><option>30</option><option>50</option><option value="all">Tutte</option></select></label><button class="btn secondary" data-action="start-range">Avvia intervallo</button></section><section class="card"><h2 class="section-title">🌍 Materia completa</h2><p class="subtle">'+all.length+' domande totali · '+remain+' ancora disponibili nel ciclo corrente.</p><label>Tipo<select id="fullSource">'+sourceOpts+'</select></label><label>Blocco<select id="fullAmount"><option>10</option><option>30</option><option>50</option><option>100</option><option value="all">Tutte le rimanenti</option></select></label><div class="stat"><span>Percorso</span><strong>'+new Set(c.fullCampaign?.seenIds||[]).size+'/'+qbank(c).length+'</strong><small>'+remain+' rimanenti</small></div><div class="actions"><button class="btn" data-action="start-full" '+(remain?'':'disabled')+'>Continua ciclo</button><button class="btn ghost" data-action="reset-cycle">Ricomincia ciclo</button></div></section></div>',c.subject,'Nuovo quiz',true);
+ page('<div class="stack"><section class="card training-overview"><div><div class="eyebrow">Banca disponibile</div><h2 class="section-title">'+all.length+' domande</h2></div><div class="pill-row"><span class="pill off">'+c.officialBank.length+' ufficiali</span><span class="pill ai">'+c.aiBank.length+' AI</span></div></section><section class="card training-card"><h2 class="section-title">🎓 Simulazione esame</h2><p class="subtle">31 domande · 30 minuti · nessuna correzione durante la prova. Le prime 30 determinano il voto; la 31ª vale solo per la lode.</p><button class="btn" data-action="start-exam" '+(qbank(c).length<31?'disabled':'')+'>Avvia simulazione</button></section><section class="card training-card"><h2 class="section-title">📚 Allenamento per capitolo</h2><div class="row"><label>Capitolo<select id="chapterSelect">'+chs.map(ch=>'<option value="'+ch+'" '+(ch===first?'selected':'')+'>Capitolo '+ch+' · '+chapterCount.get(ch)+' domande</option>').join('')+'</select></label><label>Tipo<select id="chapterSource">'+sourceOpts+'</select></label></div><label>Domande<select id="chapterAmount"><option>10</option><option>20</option><option value="all">Tutte</option></select></label><button class="btn secondary" data-action="start-chapter">Avvia capitolo</button></section><section class="card training-card"><h2 class="section-title">📖 Intervallo di programma</h2><div class="row"><label>Da<select id="rangeFrom">'+chs.map(ch=>'<option value="'+ch+'">'+ch+'</option>').join('')+'</select></label><label>A<select id="rangeTo">'+chs.map(ch=>'<option value="'+ch+'" '+(ch===last?'selected':'')+'>'+ch+'</option>').join('')+'</select></label></div><label>Tipo<select id="rangeSource">'+sourceOpts+'</select></label><label>Domande<select id="rangeAmount"><option>10</option><option>20</option><option>30</option><option>50</option><option value="all">Tutte</option></select></label><button class="btn secondary" data-action="start-range">Avvia intervallo</button></section><section class="card training-card"><h2 class="section-title">🌍 Materia completa</h2><p class="subtle">'+all.length+' domande totali · '+remain+' ancora disponibili nel ciclo corrente.</p><label>Tipo<select id="fullSource">'+sourceOpts+'</select></label><label>Blocco<select id="fullAmount"><option>10</option><option>30</option><option>50</option><option>100</option><option value="all">Tutte le rimanenti</option></select></label><div class="stat"><span>Percorso</span><strong>'+new Set(c.fullCampaign?.seenIds||[]).size+'/'+qbank(c).length+'</strong><small>'+remain+' rimanenti</small></div><div class="actions"><button class="btn" data-action="start-full" '+(remain?'':'disabled')+'>Continua ciclo</button><button class="btn ghost" data-action="reset-cycle">Ricomincia ciclo</button></div></section></div>',c.subject,'Nuovo quiz',true);
 }
 
 function filtered(c,source,chapter){return qbank(c).filter(q=>(source==='mixed'||q.source===source)&&(chapter==='all'||Number(q.chapter)===Number(chapter)));}
@@ -491,6 +518,7 @@ function startSession(questions,title,mode='training'){
  if(!featuresAllowed()){licensePage();return;}
  if(!questions.length){toast('Nessuna domanda disponibile');return;}
  clearTimeout(autoSyncTimer);
+ globalThis.QuizLabCourseRecency.touch(currentWorkspaceKey(),route.courseId);
  session={questions:[...questions],index:0,answers:{},title,mode,reviewPolicy:mode==='review'?'clear-on-correct':null,startedAt:Date.now(),questionShownAt:Date.now(),feedback:null,durationMs:mode==='exam'?30*60*1000:0,finished:false};
  route.name='session';
  startExamTimer();

@@ -122,7 +122,9 @@
     if(tab==='preferences'&&(force||!recent('devices'))){wanted.push('devices');jobs.push(call('devices'));}
     const results=await Promise.all(jobs),at=Date.now();if(tab==='preferences')runtimePush=await readRuntimePush();if(disposed)return;
     for(let i=0;i<wanted.length;i++){const kind=wanted[i],value=results[i];loadedAt[kind]=at;if(kind==='dashboard'){data=value;preferences=data.preferences;loadedAt.preferences=at;}else if(kind==='preferences')preferences=value;else if(kind==='devices')devices=value;else{inbox=value;inboxPageKey=offset+'|'+archive;}}
-    cache={...cache,data,preferences,inbox,inboxOffset:offset,inboxArchive:archive};persist();draw();if(jobs.length)options.onChange?.();
+    cache={...cache,data,preferences,inbox,inboxOffset:offset,inboxArchive:archive};persist();draw();
+    if(platform==='pwa'&&tab==='preferences'&&runtimePush&&loadedAt.devices>0)root.dispatchEvent(new CustomEvent('quizlab-push-state',{detail:{accountId,deviceId,settings:preferences.settings,runtime:runtimePush,device:devices.find(d=>d.device_id===deviceId)||null}}));
+    if(jobs.length)options.onChange?.();
    }
    catch(e){data=canStudy()?cache.data||null:null;preferences=cache.preferences||{revision:0,settings:root.QuizLabStudyCore.defaults()};inbox=cache.inbox||inbox;offset=cache.inboxOffset||0;archive=!!cache.inboxArchive;if(!canStudy())inbox={...inbox,rows:inbox.rows.filter(n=>n.category==='service')};draw();message('Connessione non disponibile. Mostro l’ultima copia di questo account. '+e.message,true);}
   }
