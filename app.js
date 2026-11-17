@@ -562,7 +562,16 @@ async function confirmAnswer(){
  try{await saveCourse(route.courseId,c);if(operationCurrent(op)&&session===active){a.confirmed=true;a.correct=correct;}}
  catch(error){if(operationCurrent(op)&&session===active){a.saving=false;render();}throw error;}
  finally{a.saving=false;}
- if(operationCurrent(op)&&session===active)render();
+ if(operationCurrent(op)&&session===active){render();revealAnswerFeedback();}
+}
+function revealAnswerFeedback(){
+ const feedback=app.querySelector('.feedback'),next=app.querySelector('[data-action="next"]');
+ if(!feedback||!next)return;
+ const top=(app.querySelector('.topbar')?.getBoundingClientRect().bottom||0)+12;
+ const bottom=Math.min(innerHeight,app.querySelector('.mobile-bottom-nav')?.getBoundingClientRect().top??innerHeight)-12;
+ const start=feedback.getBoundingClientRect().top;
+ if(start>=top&&next.getBoundingClientRect().bottom<=bottom)return;
+ window.scrollTo({top:Math.max(0,scrollY+start-top),behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
 }
 function syncAfterLocalStudy(){clearTimeout(autoSyncTimer);autoSyncTimer=null;cloudSync({silent:true}).catch(error=>console.warn('Sincronizzazione studio in attesa',error));}
 async function nextQuestion(){if(!session)return;const active=session,op=captureOperation();if(session.index<session.questions.length-1){session.index++;session.questionShownAt=Date.now();render();}else{if(!operationCurrent(op)||session!==active)return;route.name='results';render();syncAfterLocalStudy();}}
