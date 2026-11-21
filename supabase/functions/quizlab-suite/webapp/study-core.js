@@ -73,6 +73,9 @@
  function periodBounds(goal,now,zone){
   const today=localParts(now,zone).day;let start=goal.startDate||today,end=goal.deadline||'9999-12-31',periodKey=goal.startDate||'all';
   if(goal.metric==='recovery')return{start,end,periodKey:'recovery:'+start};
+  // A consecutive-day target is acquired once, even if the streak later breaks.
+  // Legacy clients allowed a daily/weekly choice which must not reopen it.
+  if(goal.metric==='streak')return{start,end,periodKey:'streak:'+(goal.startDate||'all')};
   if(goal.period==='daily'){start=today;end=today;periodKey=today;}
   if(goal.period==='weekly'){const weekday=(new Date(today+'T12:00Z').getUTCDay()+6)%7;start=new Date((dayNumber(today)-weekday)*dayMs).toISOString().slice(0,10);end=new Date((dayNumber(start)+6)*dayMs).toISOString().slice(0,10);periodKey=start;}
   return{start,end,periodKey};
@@ -102,18 +105,26 @@
  function examDays(exam,now,zone){return Math.round(dayNumber(exam.date)-dayNumber(localParts(now,zone).day));}
  function goalDefinition(goal){
   const baseline=(goal.baseline||[]).map(v=>{if(goal.baselineEncoding==='json-pair-v1'&&String(v).startsWith('[')){try{const pair=JSON.parse(v);return pair.join('\u0000');}catch{}}return v;}).sort();
-  return JSON.stringify({metric:goal.metric,courseId:goal.courseId||null,period:goal.metric==='recovery'?'custom':goal.period,target:goal.metric==='recovery'?baseline.length:goal.target,startDate:goal.startDate||null,deadline:goal.deadline||null,minSample:goal.minSample||1,baseline:goal.metric==='recovery'?baseline:undefined});
+  return JSON.stringify({metric:goal.metric,courseId:goal.courseId||null,period:['recovery','streak'].includes(goal.metric)?'custom':goal.period,target:goal.metric==='recovery'?baseline.length:goal.target,startDate:goal.startDate||null,deadline:goal.deadline||null,minSample:goal.minSample||1,baseline:goal.metric==='recovery'?baseline:undefined});
+ }
+ function completionMatches(goal,evidence,periodKey){
+  if(!evidence||evidence.verified!==true)return false;
+  const expected=goalDefinition(goal);let definition=evidence.definition;
+  if(goal.metric==='streak'&&definition!==expected){
+   try{const legacy=JSON.parse(definition);if(legacy.metric!=='streak')return false;definition=goalDefinition(legacy);}catch{return false;}
+  }
+  return definition===expected&&(goal.metric==='streak'||evidence.periodKey===periodKey);
  }
  function preserveCompletion(goal,progress,evidence=goal.completionEvidence){
   const paused=!!goal.paused,reason=paused?(goal.closedReason==='exam_passed'?'exam_passed':goal.closedReason==='manual'?'manual':'unspecified'):null;
-  const confirmed=!!evidence&&evidence.verified===true&&evidence.definition===goalDefinition(goal)&&evidence.periodKey===progress.periodKey;
+  const confirmed=completionMatches(goal,evidence,progress.periodKey);
   return {...progress,paused,pauseReason:reason,...(confirmed?{status:'achieved',percent:100,remaining:0,value:evidence.value,target:evidence.target,valid:true,completedAt:evidence.at,completionPreserved:true}:{})};
  }
  function italianDate(date){return /^\d{4}-\d{2}-\d{2}$/.test(date||'')?date.slice(8)+'/'+date.slice(5,7)+'/'+date.slice(0,4):'';}
  function examLabel(exam){return exam.days===0?'Oggi':exam.days===1?'Domani':italianDate(exam.date)+(Number.isFinite(exam.days)?' · tra '+exam.days+' giorni':'');}
  function goalPeriodLabel(goal,now=new Date(),zone='Europe/Rome'){
   if(goal.metric==='recovery')return 'Recupero errori · una sola volta';
-  if(goal.metric==='streak')return 'Continuità dell’account · giorni di studio consecutivi';
+  if(goal.metric==='streak')return 'Continuità dell’account · una sola volta · risultato conservato';
   const b=periodBounds(goal,now,zone);
   if(goal.period==='daily')return 'Oggi · '+italianDate(b.start)+' · riparte a mezzanotte';
   if(goal.period==='weekly')return 'Questa settimana · lun–dom · '+italianDate(b.start)+' – '+italianDate(b.end);
@@ -129,6 +140,6 @@
   return out.sort((a,b)=>b.percent-a.percent||a.target-b.target||a.key.localeCompare(b.key));
  }
  function goalOverlapsBadge(candidate,items){return items.some(i=>{const g=i.data||i;return !g.paused&&(g.metric===candidate.metric||['unique','coverage'].includes(candidate.metric)&&['unique','attempts','correct','coverage','officialCoverage'].includes(g.metric))&&(!candidate.courseId&&!g.courseId||candidate.courseId&&(!g.courseId||g.courseId===candidate.courseId));});}
- const core={goalDefinition,preserveCompletion,italianDate,examLabel,goalPeriodLabel,badgeCandidates,goalOverlapsBadge,defaults,pushPresentation,localParts,deliveryWindow,inQuietHours,nextDeliveryAt,summarize,goalValue,examDays,dayNumber};
+ const core={goalDefinition,completionMatches,preserveCompletion,italianDate,examLabel,goalPeriodLabel,badgeCandidates,goalOverlapsBadge,defaults,pushPresentation,localParts,deliveryWindow,inQuietHours,nextDeliveryAt,summarize,goalValue,examDays,dayNumber};
  root.QuizLabStudyCore=core;if(typeof module!=='undefined'&&module.exports)module.exports=core;
 })(typeof globalThis==='undefined'?this:globalThis);
