@@ -143,7 +143,7 @@
  const core={goalDefinition,completionMatches,preserveCompletion,italianDate,examLabel,goalPeriodLabel,badgeCandidates,goalOverlapsBadge,defaults,pushPresentation,localParts,deliveryWindow,inQuietHours,nextDeliveryAt,summarize,goalValue,examDays,dayNumber};
  root.QuizLabStudyCore=core;if(typeof module!=='undefined'&&module.exports)module.exports=core;
 })(typeof globalThis==='undefined'?this:globalThis);
-const CACHE='quizlab-v0.11.29-r11';
+const CACHE='quizlab-v0.11.29-r12';
 const ROOT=new URL('./',self.location.href);
 const INDEX=new URL('./index.html',ROOT).href;
 const MANIFEST=new URL('./asset-manifest.json',ROOT).href;
