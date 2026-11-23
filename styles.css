@@ -563,3 +563,9 @@ body{background:
 :root[data-theme="light"] .journey-card.journey-compact,.ql-modal[data-theme="light"] .journey-card.journey-compact{--journey-text:#1a4442;--journey-muted:#4d6968;--journey-line:#bfd6ce;--journey-tile:#fafffc;background:radial-gradient(ellipse at 100% 0%,rgba(32,189,168,.12),transparent 65%),linear-gradient(135deg,#fbfffe,#eff8f2);box-shadow:inset 0 1px 0 #fff}
 :root[data-theme="light"] .journey-quick-arrow,.ql-modal[data-theme="light"] .journey-quick-arrow{color:#187b66}
 @media(max-width:600px){.journey-card.journey-compact{padding:12px!important}.journey-compact-heading{gap:8px}.journey-compact-copy h2{font-size:17px;line-height:22px}.journey-compact .journey-open{padding:8px 10px}.journey-quick-grid{grid-template-columns:1fr;gap:8px}.journey-compact .journey-quick-card{min-height:0;padding:10px 12px}.journey-quick-title{font-size:15px;line-height:20px}}
+
+/* Chapter training: an optional, account-scoped resume filter. */
+.training-card .chapter-progress-option{display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--line);border-radius:12px;cursor:pointer;font-size:13px;line-height:1.45}
+.chapter-progress-option input[type="checkbox"]{width:20px;height:20px;flex:0 0 20px;margin:1px 0 0;padding:0;accent-color:var(--accent)}
+.chapter-progress-option span{min-width:0;font-weight:700}.chapter-progress-option small{display:block;margin-top:4px;font-size:11px;font-weight:400;color:var(--muted)}
+.training-card .chapter-remaining{font-size:12px;line-height:1.5;margin:0}
